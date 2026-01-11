@@ -1,0 +1,90 @@
+.field-referral_by select {
+    width: 300px !important;
+    padding: 5px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    background-color: #fff !important;
+    font-size: 14px !important;
+}
+
+.field-referral_by select:focus {
+    border-color: #79aec8 !important;
+    outline: none !important;
+    box-shadow: 0 0 5px rgba(121, 174, 200, 0.5) !important;
+}
+
+.field-referral_by select option {
+    padding: 8px !important;
+}
+
+/* Hover state for options */
+.field-referral_by select option:hover {
+    background-color: #f0f0f0 !important;
+}
+
+/* Selected option */
+.field-referral_by select option:checked {
+    background-color: #79aec8 !important;
+    color: white !important;
+}
+
+/* ===== REMOVE ALL FILTER SIDEBARS FOR CLEANER ADMIN ===== */
+/* Hide all filter sidebars globally */
+#changelist-filter {
+    display: none !important;
+}
+
+/* Remove margin for all results tables when no filters */
+#changelist .results {
+    margin-right: 0 !important;
+}
+
+#changelist {
+    margin-right: 0 !important;
+    width: 100% !important;
+}
+
+/* Make content area use full width */
+#content {
+    margin-right: 0 !important;
+    width: 100% !important;
+}
+
+/* Specific fixes for transaction model */
+.model-transaction #changelist-filter {
+    display: none !important;
+}
+
+.model-transaction .results {
+    margin-right: 0 !important;
+}
+
+.model-transaction #changelist {
+    margin-right: 0 !important;
+}
+
+/* Specific fixes for user model */
+.model-user #changelist-filter {
+    display: none !important;
+}
+
+.model-user .results {
+    margin-right: 0 !important;
+}
+
+.model-user #changelist {
+    margin-right: 0 !important;
+}
+
+/* Specific fixes for product model */
+.model-product #changelist-filter {
+    display: none !important;
+}
+
+.model-product .results {
+    margin-right: 0 !important;
+}
+
+.model-product #changelist {
+    margin-right: 0 !important;
+}

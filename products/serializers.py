@@ -1,0 +1,264 @@
+from rest_framework import serializers
+from .models import Product, Transaction, Investment
+from django.core.files.storage import default_storage
+from django.conf import settings
+
+class ProductListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for product list view - shows detailed information
+    """
+    image = serializers.SerializerMethodField()
+    purchase_commission_rates = serializers.SerializerMethodField()
+    profit_commission_rates = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Product
+        fields = (
+            'id', 'name', 'description', 'price', 'image', 'status',
+            'purchase_limit', 'stock', 'stock_enabled', 'profit_rate', 
+            'profit_type', 'profit_random_min', 'profit_random_max', 'duration', 'specifications', 'created_at',
+            'purchase_commission_rates', 'profit_commission_rates'
+        )
+        read_only_fields = fields
+
+    def get_image(self, obj):
+        """Return full URL for image; fallback to default if missing"""
+        request = self.context.get('request')
+        try:
+            img = getattr(obj, 'image', None)
+            if img:
+                name = getattr(img, 'name', None)
+                exists = bool(name) and default_storage.exists(name)
+                url = img.url if exists else settings.MEDIA_URL + 'products/default.png'
+            else:
+                url = settings.MEDIA_URL + 'products/default.png'
+        except Exception:
+            url = settings.MEDIA_URL + 'products/default.png'
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+    def get_purchase_commission_rates(self, obj):
+        """Return purchase commission rates for levels 1-5 as percentages"""
+        return [
+            float(getattr(obj, f'purchase_rebate_level_{i}', 0))
+            for i in range(1, 6)
+        ]
+
+    def get_profit_commission_rates(self, obj):
+        """Return profit commission rates for levels 1-5 as percentages"""
+        return [
+            float(getattr(obj, f'profit_rebate_level_{i}', 0))
+            for i in range(1, 6)
+        ]
+
+class ProductDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for product detail view - shows all information
+    """
+    
+    class Meta:
+        model = Product
+        fields = '__all__'
+        read_only_fields = ('created_at', 'updated_at')
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    user_phone = serializers.CharField(source='user.phone', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    upline_phone = serializers.CharField(source='upline_user.phone', read_only=True)
+    bank_account_name = serializers.SerializerMethodField()
+    bank_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+        read_only_fields = ('created_at', 'trx_id', 'user_phone', 'product_name', 'upline_phone', 'bank_account_name', 'bank_name')
+
+    def validate(self, data):
+        # Validate amount is positive
+        if data.get('amount', 0) <= 0:
+            raise serializers.ValidationError({
+                'amount': 'Nominal harus lebih dari 0'
+            })
+        
+        # Validate investment quantity if product is provided
+        if data.get('product') and data.get('investment_quantity'):
+            if data['investment_quantity'] > data['product'].purchase_limit:
+                raise serializers.ValidationError({
+                    'investment_quantity': f'Tidak boleh membeli lebih dari {data["product"].purchase_limit} unit'
+                })
+            
+            if data['product'].stock_enabled and data['product'].stock < data['investment_quantity']:
+                raise serializers.ValidationError({
+                    'investment_quantity': 'Stok tidak mencukupi'
+                })
+        
+        return data
+
+    def get_bank_account_name(self, obj):
+        try:
+            wd = getattr(obj, 'related_withdrawal', None)
+            if wd and wd.bank_account:
+                return wd.bank_account.account_name
+        except Exception:
+            pass
+        return None
+
+    def get_bank_name(self, obj):
+        try:
+            wd = getattr(obj, 'related_withdrawal', None)
+            if wd and wd.bank_account and wd.bank_account.bank:
+                return wd.bank_account.bank.name
+        except Exception:
+            pass
+        return None
+
+
+class InvestmentSerializer(serializers.ModelSerializer):
+    user_phone = serializers.CharField(source='user.phone', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    transaction_id = serializers.CharField(source='transaction.trx_id', read_only=True)
+    daily_profit = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    total_potential_profit = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    remaining_profit = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    can_claim_today = serializers.BooleanField(read_only=True)
+    can_claim_manually = serializers.BooleanField(read_only=True)
+    next_claim_time_calculated = serializers.SerializerMethodField()
+    product_image = serializers.SerializerMethodField()
+
+    def get_next_claim_time_calculated(self, obj):
+        """Get next claim time even for new investments"""
+        return obj.get_next_claim_time()
+    
+    def get_product_image(self, obj):
+        product = obj.product
+        request = self.context.get('request')
+        try:
+            if product and getattr(product, 'image', None):
+                img = product.image
+                name = getattr(img, 'name', None)
+                exists = bool(name) and default_storage.exists(name)
+                url = img.url if exists else settings.MEDIA_URL + 'products/default.png'
+            else:
+                url = settings.MEDIA_URL + 'products/default.png'
+        except Exception:
+            url = settings.MEDIA_URL + 'products/default.png'
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+    class Meta:
+        model = Investment
+        fields = '__all__'
+        read_only_fields = (
+            'user', 'transaction', 'total_amount', 'profit_type', 'profit_rate', 
+            'profit_method', 'claim_reset_mode', 'duration_days', 'expires_at',
+            'last_claim_time', 'next_claim_time', 'total_claimed_profit', 'status',
+            'created_at', 'updated_at', 'user_phone', 'product_name', 'transaction_id', 'daily_profit',
+            'total_potential_profit', 'remaining_profit', 'can_claim_today', 'can_claim_manually',
+            'next_claim_time_calculated', 'profit_random_min', 'profit_random_max'
+        )
+
+
+class ProductPurchaseSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1, default=1)
+    
+    def validate_product_id(self, value):
+        try:
+            product = Product.objects.get(id=value, status=1)
+        except Product.DoesNotExist:
+            raise serializers.ValidationError("Produk tidak ditemukan atau tidak aktif.")
+        return value
+    
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Kuantitas harus lebih dari 0.")
+        return value
+    
+    def validate(self, data):
+        # Additional validation for product purchase
+        product = Product.objects.get(id=data['product_id'])
+        quantity = data['quantity']
+        user = self.context['request'].user
+        
+        # Check stock if enabled
+        if product.stock_enabled and product.stock < quantity:
+            raise serializers.ValidationError({
+                'quantity': f'Stok tidak mencukupi. Tersedia: {product.stock}'
+            })
+        
+        # Check purchase limits per quantity
+        if quantity > product.purchase_limit:
+            raise serializers.ValidationError({
+                'quantity': f'Kuantitas melebihi batas pembelian {product.purchase_limit}'
+            })
+        
+        # Check if user has already reached the purchase limit for this product
+        from .models import Investment
+        existing_investments = Investment.objects.filter(
+            user=user, 
+            product=product
+        ).count()
+        
+        if existing_investments >= product.purchase_limit:
+            raise serializers.ValidationError({
+                'product_id': f'Batas pembelian tercapai. Anda hanya bisa membeli produk ini {product.purchase_limit} kali. Saat ini sudah {existing_investments} kali.'
+            })
+        
+        return data
+
+
+class ClaimProfitSerializer(serializers.Serializer):
+    investment_id = serializers.IntegerField()
+    
+    def validate_investment_id(self, value):
+        request = self.context.get('request')
+        if not request or not request.user:
+            raise serializers.ValidationError("Autentikasi diperlukan")
+        
+        try:
+            Investment.objects.get(id=value, user=request.user)
+        except Investment.DoesNotExist:
+            raise serializers.ValidationError("Investasi tidak ditemukan atau bukan milik user")
+        
+        return value
+
+
+class ClaimCashbackSerializer(serializers.Serializer):
+    transaction_id = serializers.CharField(max_length=50)
+    
+    def validate_transaction_id(self, value):
+        request = self.context.get('request')
+        if not request or not request.user:
+            raise serializers.ValidationError("Autentikasi diperlukan")
+        
+        try:
+            # Find the purchase transaction
+            transaction = Transaction.objects.get(
+                trx_id=value, 
+                user=request.user,
+                type='INVESTMENTS',
+                status='COMPLETED'
+            )
+            
+            # Check if product has cashback enabled
+            if not transaction.product or not transaction.product.cashback_enabled:
+                raise serializers.ValidationError("Transaksi ini tidak memenuhi syarat cashback")
+            
+            # Rule: satu cashback per produk per user
+            product = transaction.product
+            existing_cashback = Transaction.objects.filter(
+                user=request.user,
+                product=product,
+                type='CASHBACK'
+            ).exists()
+            
+            if existing_cashback:
+                raise serializers.ValidationError("Cashback untuk produk ini sudah pernah diklaim")
+                
+        except Transaction.DoesNotExist:
+            raise serializers.ValidationError("Transaksi tidak ditemukan atau tidak memenuhi syarat untuk klaim cashback")
+        
+        return value

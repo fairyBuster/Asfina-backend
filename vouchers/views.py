@@ -1,0 +1,152 @@
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from django.utils import timezone
+from django.db import transaction as db_transaction
+from django.db.models import Q
+import uuid
+from zoneinfo import ZoneInfo
+
+from .models import Voucher, VoucherUsage
+from .serializers import (
+    VoucherSerializer,
+    ClaimVoucherSerializer,
+    VoucherListResponseSerializer,
+    ClaimVoucherResponseSerializer,
+)
+from products.models import Transaction
+
+
+class VoucherListView(APIView):
+    @extend_schema(
+        tags=["User API"],
+        description="List voucher aktif yang bisa diklaim",
+        responses={200: OpenApiResponse(response=VoucherListResponseSerializer)},
+    )
+    def get(self, request):
+        now = timezone.now()
+        qs = Voucher.objects.filter(is_active=True).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+        )
+        serializer = VoucherSerializer(qs, many=True)
+        return Response({
+            'count': qs.count(),
+            'results': serializer.data
+        })
+
+
+class ClaimVoucherView(APIView):
+    throttle_scope = 'voucher_claim'
+    @extend_schema(
+        tags=["User API"],
+        description="Claim voucher untuk menambah saldo user",
+        request=ClaimVoucherSerializer,
+        responses={
+            201: OpenApiResponse(response=ClaimVoucherResponseSerializer),
+            400: OpenApiResponse(description='Voucher tidak aktif/kedaluwarsa/batas penggunaan habis/nominal tidak valid'),
+            404: OpenApiResponse(description='Voucher tidak ditemukan'),
+        },
+    )
+    def post(self, request):
+        serializer = ClaimVoucherSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = serializer.validated_data['code']
+
+        try:
+            voucher = Voucher.objects.get(code=code)
+        except Voucher.DoesNotExist:
+            return Response({'error': 'Voucher tidak ditemukan'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate voucher
+        if not voucher.is_active:
+            return Response({'error': 'Voucher tidak aktif'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if voucher.expires_at and timezone.now() >= voucher.expires_at:
+            return Response({'error': 'Voucher sudah kedaluwarsa'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if voucher.used_count >= voucher.usage_limit:
+            return Response({'error': 'Voucher telah mencapai batas penggunaan'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Enforce one-time usage per user per voucher code
+        if VoucherUsage.objects.filter(voucher=voucher, user=request.user).exists():
+            return Response({'error': 'Voucher ini sudah digunakan oleh akun Anda'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Calculate amount mirroring attendance types
+        from decimal import Decimal
+        import random
+
+        user = request.user
+
+        if voucher.type == 'fixed':
+            base_amount = Decimal(voucher.amount or 0)
+        elif voucher.type == 'random':
+            min_amt = Decimal(voucher.min_amount or 0)
+            max_amt = Decimal(voucher.max_amount or 0)
+            if max_amt < min_amt:
+                max_amt = min_amt
+            rand_float = random.uniform(float(min_amt), float(max_amt))
+            base_amount = Decimal(str(rand_float)).quantize(Decimal('0.01'))
+        elif voucher.type == 'rank':
+            rank_key = str(user.rank or '').strip()
+            amount_from_rank = None
+            if rank_key:
+                try:
+                    amount_from_rank = Decimal(str((voucher.rank_rewards or {}).get(rank_key, 0)))
+                except Exception:
+                    amount_from_rank = Decimal('0')
+            base_amount = amount_from_rank if amount_from_rank and amount_from_rank > 0 else Decimal(voucher.amount or 0)
+        else:
+            base_amount = Decimal(voucher.amount or 0)
+
+        amount = base_amount
+
+        if amount <= 0:
+            return Response({'error': 'Nominal voucher tidak valid'}, status=status.HTTP_400_BAD_REQUEST)
+
+        balance_field = 'balance' if voucher.balance_type == 'BALANCE' else 'balance_deposit'
+
+        with db_transaction.atomic():
+            # Credit balance
+            current_balance = getattr(user, balance_field)
+            setattr(user, balance_field, current_balance + amount)
+            user.save()
+
+            # Create transaction record
+            trx_id = f"VCH-{timezone.localtime(timezone.now(), ZoneInfo('Asia/Jakarta')).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+            trx = Transaction.objects.create(
+                user=user,
+                product=None,
+                type='VOUCHER',
+                amount=amount,
+                description=f'Voucher claim {voucher.code}',
+                status='COMPLETED',
+                wallet_type=voucher.balance_type,
+                voucher_id=voucher.id,
+                voucher_code=voucher.code,
+                trx_id=trx_id,
+            )
+
+            # Log usage
+            VoucherUsage.objects.create(
+                voucher=voucher,
+                user=user,
+                transaction=trx,
+                voucher_code=voucher.code,
+                amount_credited=amount,
+                amount_received=amount,
+                balance_type=voucher.balance_type,
+            )
+
+            # Increment usage counter
+            voucher.used_count += 1
+            voucher.save(update_fields=['used_count'])
+
+        return Response({
+            'message': 'Voucher berhasil diclaim',
+            'voucher_code': voucher.code,
+            'amount': str(amount),
+            'wallet_type': voucher.balance_type,
+            'transaction_id': trx.trx_id,
+            'balance': str(getattr(user, balance_field))
+        }, status=status.HTTP_201_CREATED)

@@ -1,0 +1,214 @@
+# ========================================================
+# NGINX FULL POWER CONFIGURATION
+# c-abbt-new-final-backend (api.ggeeccss.xyz)
+# ========================================================
+# OPTIMISASI MAKSIMAL:
+# - HTTP/1.1 + Keepalive connection pooling
+# - TCP upstream (127.0.0.1:8000) - KONSISTEN
+# - Buffer optimization untuk JSON responses
+# - SSL/TLS modern ciphers
+# - Gzip compression
+# - Rate limiting & DDoS protection
+# - Performance tuning lengkap
+# ========================================================
+
+# Upstream dengan TCP + Keepalive (PENTING!)
+upstream backend_gunicorn {
+    # Gunakan TCP socket (127.0.0.1:8000) - KONSISTEN dengan sites-enabled
+    server 127.0.0.1:8000 max_fails=3 fail_timeout=30s;
+
+    # Keepalive connection pool
+    keepalive 32;
+    keepalive_timeout 60s;
+    keepalive_requests 100;
+}
+
+# ========================================================
+# HTTP → HTTPS Redirect
+# ========================================================
+server {
+    listen 80;
+    listen [::]:80;
+server_name api.atergrondiss.online;
+
+    # Redirect semua HTTP ke HTTPS
+    return 301 https://$host$request_uri;
+}
+
+# ========================================================
+# HTTPS Server - FULL POWER
+# ========================================================
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.ggeeccss.xyz;
+
+    # ========== SSL/TLS Configuration ==========
+    ssl_certificate /var/www/osim-api/deploy/certs.pem;
+    ssl_certificate_key /var/www/osim-api/deploy/certs.pem;
+
+    # Modern SSL protocols (TLS 1.2 & 1.3 only)
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # SSL session optimization
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # OCSP stapling
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # ========== Logging ==========
+    access_log /var/log/nginx/api.ggeeccss.xyz.access.log combined buffer=32k flush=5s;
+    error_log /var/log/nginx/api.ggeeccss.xyz.error.log warn;
+
+    # ========== Performance Tuning ==========
+    client_max_body_size 100M;
+    client_body_timeout 30s;
+    client_header_timeout 30s;
+    send_timeout 30s;
+
+    # Gzip compression (CRITICAL untuk JSON)
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript
+               application/json application/javascript application/xml+rss
+               application/rss+xml font/truetype font/opentype
+               application/vnd.ms-fontobject image/svg+xml;
+    gzip_min_length 1024;
+    gzip_buffers 16 8k;
+    gzip_disable "msie6";
+
+    # ========== Favicon & Health Check ==========
+    location = /favicon.ico {
+        access_log off;
+        log_not_found off;
+        return 204;
+    }
+    location ^~ /static/ {
+        alias /var/www/osim-api/staticfiles/;
+
+        # Cache static files 1 year
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff";
+
+        access_log off;
+    }
+    # ========== Static Files ==========
+    location /staticfiles/ {
+        alias /var/www/osim-api/staticfiles/;
+
+        # Cache static files 1 tahun
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff";
+
+        access_log off;
+    }
+
+    # ========== Media Files ==========
+    location /media/ {
+        alias /var/www/osim-api/media/;
+
+        # Cache media 30 hari
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
+
+        access_log off;
+    }
+
+    # ========== Health Check Endpoint ==========
+    location = /health {
+        access_log off;
+        proxy_pass http://backend_gunicorn;
+
+        # Proxy headers
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeout lebih pendek untuk health check
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 5s;
+        proxy_read_timeout 5s;
+    }
+
+    # ========== API Endpoints - MAIN LOCATION ==========
+    location / {
+        # ===== CORS Preflight Handling =====
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '$http_origin' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Requested-With, Cache-Control, Pragma, Expires, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            return 204;
+        }
+
+        # ===== Proxy Configuration - HTTP/1.1 + Keepalive =====
+        proxy_pass http://backend_gunicorn;
+        proxy_http_version 1.1;
+
+        # CRITICAL: Connection keepalive (mencegah recv() failed (104))
+        proxy_set_header Connection "";
+
+        # ===== Standard Proxy Headers =====
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $server_name;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header X-Request-ID $request_id;
+
+        # Do not set CORS headers here; Django (corsheaders) will handle non-OPTIONS
+
+        # ===== Buffer Optimization (untuk JSON besar) =====
+        # Ukuran buffer untuk response headers
+        proxy_buffer_size 64k;
+
+        # Jumlah & ukuran buffer untuk response body
+        proxy_buffers 8 32k;
+
+        # Ukuran busy buffer (data yang sedang dikirim ke client)
+        proxy_busy_buffers_size 128k;
+
+        # Max ukuran single buffered response
+        proxy_max_temp_file_size 256m;
+
+        # Jangan buffer ke disk jika bisa di-memory
+        proxy_buffering on;
+
+        # ===== Timeout Configuration =====
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # ===== Performance Optimizations =====
+        # Jangan redirect dari upstream
+        proxy_redirect off;
+
+        # Matikan proxy_response dari cache jika error
+        proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout 10s;
+
+        # Disable proxy caching untuk API (handled oleh Django/Redis)
+        proxy_cache_bypass $http_cache_control $http_pragma $http_expires;
+        proxy_no_cache $http_cache_control $http_pragma $http_expires;
+    }
+
+    # ========== Error Pages ==========
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+}
