@@ -98,8 +98,19 @@ class TransactionSerializer(serializers.ModelSerializer):
 
     def get_bank_account_name(self, obj):
         try:
-            wd = getattr(obj, 'related_withdrawal', None)
-            if wd and wd.bank_account:
+            wd_manager = getattr(obj, 'related_withdrawal', None)
+            wd = None
+            if wd_manager:
+                # Handle reverse ForeignKey (manager)
+                if hasattr(wd_manager, 'all'):
+                    # Use .all() to leverage prefetch_related cache if present
+                    wds = wd_manager.all()
+                    if wds:
+                        wd = wds[0]
+                else:
+                    wd = wd_manager
+                
+            if wd and hasattr(wd, 'bank_account') and wd.bank_account:
                 return wd.bank_account.account_name
         except Exception:
             pass
@@ -107,8 +118,18 @@ class TransactionSerializer(serializers.ModelSerializer):
 
     def get_bank_name(self, obj):
         try:
-            wd = getattr(obj, 'related_withdrawal', None)
-            if wd and wd.bank_account and wd.bank_account.bank:
+            wd_manager = getattr(obj, 'related_withdrawal', None)
+            wd = None
+            if wd_manager:
+                # Handle reverse ForeignKey (manager)
+                if hasattr(wd_manager, 'all'):
+                    wds = wd_manager.all()
+                    if wds:
+                        wd = wds[0]
+                else:
+                    wd = wd_manager
+
+            if wd and hasattr(wd, 'bank_account') and wd.bank_account and wd.bank_account.bank:
                 return wd.bank_account.bank.name
         except Exception:
             pass
@@ -118,6 +139,7 @@ class TransactionSerializer(serializers.ModelSerializer):
 class InvestmentSerializer(serializers.ModelSerializer):
     user_phone = serializers.CharField(source='user.phone', read_only=True)
     product_name = serializers.CharField(source='product.name', read_only=True)
+    product_price = serializers.DecimalField(source='product.price', max_digits=15, decimal_places=2, read_only=True)
     transaction_id = serializers.CharField(source='transaction.trx_id', read_only=True)
     daily_profit = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     total_potential_profit = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
@@ -155,7 +177,7 @@ class InvestmentSerializer(serializers.ModelSerializer):
             'user', 'transaction', 'total_amount', 'profit_type', 'profit_rate', 
             'profit_method', 'claim_reset_mode', 'duration_days', 'expires_at',
             'last_claim_time', 'next_claim_time', 'total_claimed_profit', 'status',
-            'created_at', 'updated_at', 'user_phone', 'product_name', 'transaction_id', 'daily_profit',
+            'created_at', 'updated_at', 'user_phone', 'product_name', 'product_price', 'transaction_id', 'daily_profit',
             'total_potential_profit', 'remaining_profit', 'can_claim_today', 'can_claim_manually',
             'next_claim_time_calculated', 'profit_random_min', 'profit_random_max'
         )

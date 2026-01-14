@@ -75,6 +75,38 @@ class GeneralSetting(models.Model):
         default=1,
         help_text='Hitung downline hingga level ini (1=Level 1 saja, 2=Level 1+2, dst.)'
     )
+    
+    # OTP Settings
+    otp_enabled = models.BooleanField(
+        default=False,
+        help_text='Enable WhatsApp OTP verification for registration'
+    )
+    verifyway_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='API Key for VerifyWay WhatsApp OTP (Deprecated)'
+    )
+    verifynow_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Customer ID for VerifyNow (Message Central)'
+    )
+    verifynow_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Base64 Encrypted Password for VerifyNow (Message Central)'
+    )
+    # WhatsApp Number Check (Backup)
+    whatsapp_check_enabled = models.BooleanField(
+        default=False,
+        help_text='Jika ON, verifikasi nomor WA aktif saat register (backup/alternatif OTP)'
+    )
+    checknumber_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='API Key untuk checknumber.ai (pemeriksa nomor WhatsApp)'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -114,6 +146,7 @@ class User(AbstractUser):
     is_account_non_locked = models.BooleanField(default=True)
     is_credentials_non_expired = models.BooleanField(default=True)
     is_enabled = models.BooleanField(default=True)
+    last_login_ip = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -269,3 +302,17 @@ class UserAddress(models.Model):
     def __str__(self):
         return f"{self.recipient_name} - {self.address_details}"
 
+
+class PhoneOTP(models.Model):
+    phone = models.CharField(max_length=20, unique=True)
+    otp_code = models.CharField(max_length=6, blank=True, null=True)
+    verification_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now=True)  # Updated on every save (new OTP)
+    verified = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name = 'Phone OTP'
+        verbose_name_plural = 'Phone OTPs'
+
+    def __str__(self):
+        return f"{self.phone} - {self.otp_code}"

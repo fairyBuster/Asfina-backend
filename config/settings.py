@@ -83,6 +83,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
+    'config.encoded_path_middleware.EncodedApiPathMiddleware',
     'config.security_middleware.DomainIPSecurityMiddleware',  # Add security middleware
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -200,6 +201,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'accounts.renderers.SaltedBase64ReverseJSONRenderer',
+    ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -217,6 +221,7 @@ REST_FRAMEWORK = {
         # Scoped endpoints
         'auth_login': '5/min',
         'auth_register': '5/hour',
+        'auth_request_otp': '1/min',
         'auth_password_change': '2/min',
         'auth_pin': '5/min',
         'deposit_initiate': '6/min',
@@ -268,6 +273,10 @@ SPECTACULAR_SETTINGS = {
         'defaultModelsExpandDepth': -1,
     }
 }
+
+RESPONSE_ENCODE_ENABLED = True
+RESPONSE_ENCODE_SALT = os.environ.get('RESPONSE_ENCODE_SALT', 'KhNHjKLvMASsjIBHMN')
+PATH_ENCODE_ENABLED = True
 
 # Jayapay integration (optional)
 JAYAPAY_ENABLED = os.environ.get('JAYAPAY_ENABLED', 'False').strip().lower() in ('true', '1', 'yes', 'on')

@@ -6,6 +6,7 @@ app_name = 'accounts'
 
 urlpatterns = [
     # Authentication endpoints (API)
+    path('request-otp/', views.RequestOTPView.as_view(), name='request_otp'),
     path('register/', views.RegisterView.as_view(), name='register'),
     path('login/', views.CustomAuthToken.as_view(), name='login'),
     path('logout/', views.LogoutView.as_view(), name='logout'),

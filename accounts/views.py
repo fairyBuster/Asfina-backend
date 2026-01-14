@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from django.db.models import Sum, Count, Q, Case, When, IntegerField, Value, DecimalField
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from accounts.models import User, GeneralSetting, UserAddress
+from accounts.models import User, GeneralSetting, UserAddress, PhoneOTP
 from accounts.serializers import DownlineOverviewSerializer, UserAddressSerializer
 from deposits.models import Deposit
 from products.models import Transaction, Investment
@@ -22,10 +22,12 @@ from decimal import Decimal
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiExample, OpenApiResponse
 from .serializers import RankLevelSerializer, RankStatusResponseSerializer
 from .models import RankLevel
-from .utils import calculate_user_rank_progress
+from .utils import calculate_user_rank_progress, send_whatsapp_otp, check_whatsapp_registered, validate_whatsapp_otp, normalize_phone
+import random
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.authentication import BaseAuthentication
 
 USER_TAG = "User API"
 ADMIN_TAG = "Admin API"
@@ -48,32 +50,156 @@ from django.views.decorators.csrf import csrf_protect
 User = get_user_model()
 
 @method_decorator(csrf_exempt, name='dispatch')
+class RequestOTPView(APIView):
+    """
+    Request OTP for phone verification.
+    """
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+    throttle_scope = 'auth_request_otp'
+    
+    @extend_schema(
+        description='Request WhatsApp OTP for phone verification',
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'phone': {'type': 'string', 'description': 'Phone number'}
+                },
+                'required': ['phone']
+            }
+        },
+        responses={
+            200: OpenApiResponse(description='OTP sent successfully'),
+            400: OpenApiResponse(description='Invalid input or OTP sending failed'),
+            503: OpenApiResponse(description='OTP service disabled')
+        }
+    )
+    def post(self, request):
+        raw_phone = request.data.get('phone')
+        if not raw_phone:
+            return Response(
+                {
+                    'error_step': 'input_validation',
+                    'phone': 'Phone number is required.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        phone = normalize_phone(raw_phone)
+            
+        settings_obj = GeneralSetting.objects.order_by('-updated_at').first()
+        if not settings_obj or not settings_obj.otp_enabled:
+            return Response(
+                {
+                    'error_step': 'settings_check',
+                    'detail': 'OTP verification is disabled.'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Check if phone already registered (optional, but good practice)
+        if User.objects.filter(phone=phone).exists():
+             return Response(
+                 {
+                     'error_step': 'db_check',
+                     'phone': 'Phone number is already registered.'
+                 },
+                 status=status.HTTP_400_BAD_REQUEST
+             )
+
+        # Rate Limiting: Check last OTP request time
+        # Allow only 1 request per minute
+        last_otp = PhoneOTP.objects.filter(phone=phone).first()
+        if last_otp and last_otp.created_at:
+            time_diff = timezone.now() - last_otp.created_at
+            if time_diff.total_seconds() < 60:
+                wait_seconds = int(60 - time_diff.total_seconds())
+                return Response(
+                    {
+                        'error_step': 'rate_limit',
+                        'detail': f'Please wait {wait_seconds} seconds before requesting OTP again.'
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS
+                )
+
+        # Validate WhatsApp Availability if enabled
+        # This prevents sending OTP to non-WhatsApp numbers (saving costs)
+        if settings_obj.whatsapp_check_enabled:
+            # Import here to avoid circular import if needed
+            from .utils import check_whatsapp_registered
+            ok, msg = check_whatsapp_registered(phone)
+            if not ok:
+                # If CheckNumber API fails/invalid key, we might want to allow sending OTP anyway or fail?
+                # Usually we want to block to save cost.
+                if "X-APP-KEY_IS_INVALID" in (msg or "") or "TOKEN IS INVALID" in (msg or ""):
+                     # If check system is broken, maybe fallback to allow? Or return Service Unavailable.
+                     # Let's return error to inform admin.
+                     return Response(
+                         {
+                             'error_step': 'whatsapp_check',
+                             'phone': 'WhatsApp check service unavailable.',
+                             'detail': msg
+                         },
+                         status=status.HTTP_503_SERVICE_UNAVAILABLE
+                     )
+                return Response(
+                    {
+                        'error_step': 'whatsapp_check',
+                        'phone': f'Nomor tidak terdaftar di WhatsApp ({msg}).',
+                        'detail': msg
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Generate OTP
+        otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Send OTP
+        success, result = send_whatsapp_otp(phone, otp_code)
+        
+        if success:
+            if result == "OTP sent successfully":
+                # Legacy VerifyWay
+                PhoneOTP.objects.update_or_create(
+                    phone=phone,
+                    defaults={'otp_code': otp_code, 'verified': False, 'verification_id': None}
+                )
+            else:
+                # VerifyNow (result is verification_id)
+                PhoneOTP.objects.update_or_create(
+                    phone=phone,
+                    defaults={'verification_id': result, 'otp_code': None, 'verified': False}
+                )
+            return Response(
+                {
+                    'detail': 'OTP sent successfully.'
+                },
+                status=status.HTTP_200_OK
+            )
+        else:
+            return Response(
+                {
+                    'error_step': 'send_otp',
+                    'detail': result
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(generics.CreateAPIView):
     """
     Register a new user with phone number authentication
     """
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
+    authentication_classes = []
     throttle_scope = 'auth_register'
     serializer_class = RegisterSerializer
 
     @extend_schema(
         description='Register a new user account',
-        request={
-            'application/json': {
-                'type': 'object',
-                'properties': {
-                    'username': {'type': 'string', 'description': 'Unique username'},
-                    'phone': {'type': 'string', 'description': 'Nomor telepon sesuai input frontend (tanpa dipaksa awalan "0")'},
-                    'password': {'type': 'string', 'format': 'password'},
-                    'password2': {'type': 'string', 'format': 'password', 'description': 'Password confirmation'},
-                    'email': {'type': 'string', 'format': 'email'},
-                    'full_name': {'type': 'string'},
-                    'referral_code': {'type': 'string', 'description': 'Optional referral code'}
-                },
-                'required': ['username', 'phone', 'password', 'password2', 'email', 'full_name']
-            }
-        },
         responses={
             201: OpenApiResponse(
                 description='User successfully registered',
@@ -111,11 +237,71 @@ class RegisterView(generics.CreateAPIView):
     )
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        # Normalize phone input
+        raw_phone = request.data.get('phone')
+        phone = normalize_phone(raw_phone)
+
+        # OTP Verification
+        setting = GeneralSetting.objects.order_by('-updated_at').first()
+        if setting and setting.otp_enabled:
+            otp_code = request.data.get('otp')
+            # phone variable is already normalized
+
+            # Jika OTP di-enable di setting, maka OTP WAJIB diisi
+            if not otp_code:
+                return Response(
+                    {'otp': ['OTP code is required.']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                phone_otp = PhoneOTP.objects.get(phone=phone)
+                
+                is_valid = False
+                if phone_otp.verification_id:
+                    # Updated signature: pass phone as first arg
+                    is_valid, error_msg = validate_whatsapp_otp(phone, phone_otp.verification_id, otp_code)
+                else:
+                    is_valid = (phone_otp.otp_code == otp_code)
+                    error_msg = "Invalid OTP code."
+
+                if not is_valid:
+                    if setting.whatsapp_check_enabled:
+                        ok, msg = check_whatsapp_registered(phone)
+                        if not ok:
+                            return Response({'otp': [f'Invalid OTP code ({error_msg}).'], 'phone': [f'Nomor tidak terverifikasi WhatsApp ({msg}).']}, status=status.HTTP_400_BAD_REQUEST)
+                    else:
+                        return Response({'otp': [f'Invalid OTP code ({error_msg}).']}, status=status.HTTP_400_BAD_REQUEST)
+            except PhoneOTP.DoesNotExist:
+                if setting.whatsapp_check_enabled:
+                    ok, msg = check_whatsapp_registered(phone)
+                    if not ok:
+                        return Response({'otp': ['OTP not requested or expired.'], 'phone': [f'Nomor tidak terverifikasi WhatsApp ({msg}).']}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({'otp': ['OTP not requested or expired.']}, status=status.HTTP_400_BAD_REQUEST)
+        elif setting and setting.whatsapp_check_enabled:
+            # Backup/alternatif: cek nomor WA aktif menggunakan checknumber.ai
+            # phone is normalized
+            ok, msg = check_whatsapp_registered(phone)
+            if not ok:
+                # Jika API Key invalid atau error teknis, sampaikan ke client agar bisa di-handle di admin
+                if "X-APP-KEY_IS_INVALID" in (msg or "") or "TOKEN IS INVALID" in (msg or ""):
+                    return Response({'phone': ['CheckNumber API key invalid atau tidak aktif.']}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                return Response({'phone': [f'Registrasi ditolak: nomor ini tidak terdeteksi punya WhatsApp aktif ({msg}).']}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Prepare data with normalized phone
+        data = request.data.copy()
+        data['phone'] = phone
+
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         
-        setting = GeneralSetting.objects.first()
+        # Clean up OTP after successful registration
+        if setting and setting.otp_enabled:
+            PhoneOTP.objects.filter(phone=phone).delete()
+        
+        # setting already fetched above
         auto_login = True if setting is None else bool(setting.auto_login_on_register)
         if setting and setting.registration_bonus_enabled and setting.registration_bonus_amount and setting.registration_bonus_amount > 0:
             amt = setting.registration_bonus_amount
@@ -139,6 +325,15 @@ class RegisterView(generics.CreateAPIView):
         }
 
         if auto_login:
+            # Capture IP on registration auto-login
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            user.last_login_ip = ip
+            user.save(update_fields=['last_login_ip'])
+
             token, _ = Token.objects.get_or_create(user=user)
             response_data['token'] = token.key
 
@@ -202,7 +397,8 @@ class CustomAuthToken(ObtainAuthToken):
         }
     )
     def post(self, request, *args, **kwargs):
-        phone = request.data.get('phone')
+        raw_phone = request.data.get('phone')
+        phone = normalize_phone(raw_phone)
         password = request.data.get('password')
         
         if not phone or not password:
@@ -213,6 +409,15 @@ class CustomAuthToken(ObtainAuthToken):
         user = authenticate(request=request, username=phone, password=password)
         
         if user:
+            # Capture IP
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            user.last_login_ip = ip
+            user.save(update_fields=['last_login_ip'])
+
             token, created = Token.objects.get_or_create(user=user)
             return Response({
                 'token': token.key,
@@ -320,7 +525,9 @@ class ChangePasswordByPhoneView(APIView):
         }
     )
     def post(self, request):
-        serializer = ChangePasswordByPhoneSerializer(data=request.data)
+        data = request.data.copy()
+        data['phone'] = normalize_phone(data.get('phone'))
+        serializer = ChangePasswordByPhoneSerializer(data=data)
         if serializer.is_valid():
             serializer.save()
             return Response({'detail': 'Password updated successfully.'}, status=status.HTTP_200_OK)

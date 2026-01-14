@@ -260,6 +260,13 @@ class WithdrawalTransactionsListView(APIView):
         else:
             queryset = Transaction.objects.filter(Q(user=request.user) | Q(upline_user=request.user))
 
+        # Optimize queries
+        queryset = queryset.select_related('user', 'product', 'upline_user').prefetch_related(
+            'related_withdrawal',
+            'related_withdrawal__bank_account',
+            'related_withdrawal__bank_account__bank'
+        )
+
         # Hanya transaksi bertipe WITHDRAW
         queryset = queryset.filter(type='WITHDRAW')
 

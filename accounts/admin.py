@@ -9,7 +9,27 @@ from .models import User
 from .views import AdminDownlineOverviewView
 from django import forms
 from decimal import Decimal
-from .models import User, GeneralSetting, RankLevel
+from .models import User, GeneralSetting, RankLevel, UserAddress, PhoneOTP
+
+
+@admin.register(PhoneOTP)
+class PhoneOTPAdmin(admin.ModelAdmin):
+    list_display = ('phone', 'otp_display', 'source_display', 'created_at', 'verified')
+    search_fields = ('phone', 'verification_id')
+    list_filter = ('verified', 'created_at')
+    readonly_fields = ('created_at',)
+
+    def otp_display(self, obj):
+        if obj.otp_code:
+            return obj.otp_code
+        return obj.verification_id or '-'
+    otp_display.short_description = 'OTP Code / Verification ID'
+
+    def source_display(self, obj):
+        if obj.verification_id:
+            return "VerifyNow"
+        return "VerifyWay (Legacy)"
+    source_display.short_description = 'Provider'
 
 
 @admin.register(User)
@@ -18,7 +38,7 @@ class UserAdmin(BaseUserAdmin):
     
     list_display = ('phone', 'email', 'full_name', 'balance_display', 'balance_deposit_display', 
                    'banned_status_display', 'rank', 'referral_code', 'referral_by_display', 
-                   'account_status_display', 'created_at')
+                   'account_status_display', 'last_login_ip', 'created_at')
     # Removed list_filter for cleaner admin interface
     search_fields = ('phone',)
     ordering = ('-created_at',)
@@ -33,7 +53,7 @@ class UserAdmin(BaseUserAdmin):
                       'is_credentials_non_expired', 'is_enabled'),
         }),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
-        ('Important dates', {'fields': ('last_login', 'date_joined', 'created_at', 'updated_at')}),
+        ('Important dates', {'fields': ('last_login', 'last_login_ip', 'date_joined', 'created_at', 'updated_at')}),
     )
     
     add_fieldsets = (
@@ -43,7 +63,7 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
     
-    readonly_fields = ('created_at', 'updated_at', 'date_joined', 'last_login', 'referral_code', 'downline_overview_link')
+    readonly_fields = ('created_at', 'updated_at', 'date_joined', 'last_login', 'last_login_ip', 'referral_code', 'downline_overview_link')
     
     def get_urls(self):
         urls = super().get_urls()
@@ -348,6 +368,14 @@ class GeneralSettingAdmin(admin.ModelAdmin):
         ('Autentikasi', {
             'fields': ('auto_login_on_register', 'registration_bonus_enabled', 'registration_bonus_amount', 'registration_bonus_wallet')
         }),
+        ('WhatsApp OTP', {
+            'fields': ('otp_enabled', 'verifynow_customer_id', 'verifynow_api_key', 'verifyway_api_key'),
+            'description': 'Konfigurasi OTP via WhatsApp (VerifyNow atau Legacy VerifyWay). Jika VerifyNow credentials diisi, sistem akan memprioritaskannya.'
+        }),
+        ('WhatsApp Number Check (Backup)', {
+            'fields': ('whatsapp_check_enabled', 'checknumber_api_key'),
+            'description': 'Opsi backup/alternatif: cek nomor WA aktif via checknumber.ai'
+        }),
         ('Kebijakan Rank', {
             'fields': ('rank_basis', 'rank_use_missions', 'rank_use_downlines_total', 'rank_use_downlines_active', 'rank_count_levels_upto'),
             'description': (
@@ -387,3 +415,11 @@ class RankLevelAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+@admin.register(UserAddress)
+class UserAddressAdmin(admin.ModelAdmin):
+    list_display = ('user', 'recipient_name', 'phone_number', 'is_primary', 'created_at')
+    search_fields = ('user__phone', 'user__email', 'recipient_name', 'phone_number', 'address_details')
+    list_filter = ('is_primary', 'created_at')
+    raw_id_fields = ('user',)

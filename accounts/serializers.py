@@ -24,11 +24,12 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
     referral_code = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    otp = serializers.CharField(required=False, allow_blank=True, write_only=True, help_text='OTP code (required if OTP is enabled)')
 
     class Meta:
         model = User
         fields = ('username', 'password', 'password2', 'email', 'full_name', 
-                 'phone', 'referral_code')
+                 'phone', 'referral_code', 'otp')
 
     def validate_phone(self, value):
         # Pass-through: jangan ubah nilai phone sama sekali
@@ -59,6 +60,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         validated_data.setdefault('rank', 1)
         # Hapus field konfirmasi yang bukan kolom model sebelum create_user
         validated_data.pop('password2', None)
+        validated_data.pop('otp', None)
         user = User.objects.create_user(**validated_data)
         return user
 
