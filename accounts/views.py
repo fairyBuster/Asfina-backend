@@ -24,6 +24,9 @@ from .serializers import RankLevelSerializer, RankStatusResponseSerializer
 from .models import RankLevel
 from .utils import calculate_user_rank_progress, send_whatsapp_otp, check_whatsapp_registered, validate_whatsapp_otp, normalize_phone
 import random
+import base64
+import json
+from django.conf import settings
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.exceptions import AuthenticationFailed
@@ -48,6 +51,28 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_protect
 
 User = get_user_model()
+
+
+def _get_request_ip(request):
+    meta = request.META
+    forwarded_client_ip = meta.get('HTTP_X_ORIGINAL_CLIENT_IP') or meta.get('HTTP_X_CLIENT_IP')
+    if forwarded_client_ip and '{' not in forwarded_client_ip and '}' not in forwarded_client_ip:
+        return forwarded_client_ip
+    cf_ip = meta.get('HTTP_CF_CONNECTING_IP')
+    if cf_ip and '{' not in cf_ip and '}' not in cf_ip:
+        return cf_ip
+    x_forwarded_for = meta.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+        if ip and '{' not in ip and '}' not in ip:
+            return ip
+    x_real_ip = meta.get('HTTP_X_REAL_IP')
+    if x_real_ip and '{' not in x_real_ip and '}' not in x_real_ip:
+        return x_real_ip
+    ip = meta.get('REMOTE_ADDR')
+    if ip and '{' not in ip and '}' not in ip:
+        return ip
+    return None
 
 @method_decorator(csrf_exempt, name='dispatch')
 class RequestOTPView(APIView):
@@ -90,12 +115,33 @@ class RequestOTPView(APIView):
             
         settings_obj = GeneralSetting.objects.order_by('-updated_at').first()
         if not settings_obj or not settings_obj.otp_enabled:
+            if settings_obj and settings_obj.whatsapp_check_enabled:
+                from .utils import check_whatsapp_registered
+                ok, msg = check_whatsapp_registered(phone)
+                if not ok:
+                    if "X-APP-KEY_IS_INVALID" in (msg or "") or "TOKEN IS INVALID" in (msg or ""):
+                        return Response(
+                            {
+                                'error_step': 'whatsapp_check',
+                                'phone': 'WhatsApp check service unavailable.',
+                                'detail': msg
+                            },
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE
+                        )
+                    return Response(
+                        {
+                            'error_step': 'whatsapp_check',
+                            'phone': f'Nomor tidak terdaftar di WhatsApp ({msg}).',
+                            'detail': msg
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             return Response(
                 {
-                    'error_step': 'settings_check',
-                    'detail': 'OTP verification is disabled.'
+                    'detail': 'OTP verification is disabled; no OTP sent.',
+                    'otp_enabled': False
                 },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
+                status=status.HTTP_200_OK
             )
 
         # Check if phone already registered (optional, but good practice)
@@ -325,14 +371,10 @@ class RegisterView(generics.CreateAPIView):
         }
 
         if auto_login:
-            # Capture IP on registration auto-login
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip = x_forwarded_for.split(',')[0]
-            else:
-                ip = request.META.get('REMOTE_ADDR')
-            user.last_login_ip = ip
-            user.save(update_fields=['last_login_ip'])
+            ip = _get_request_ip(request)
+            if ip:
+                user.last_login_ip = ip
+                user.save(update_fields=['last_login_ip'])
 
             token, _ = Token.objects.get_or_create(user=user)
             response_data['token'] = token.key
@@ -409,14 +451,10 @@ class CustomAuthToken(ObtainAuthToken):
         user = authenticate(request=request, username=phone, password=password)
         
         if user:
-            # Capture IP
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip = x_forwarded_for.split(',')[0]
-            else:
-                ip = request.META.get('REMOTE_ADDR')
-            user.last_login_ip = ip
-            user.save(update_fields=['last_login_ip'])
+            ip = _get_request_ip(request)
+            if ip:
+                user.last_login_ip = ip
+                user.save(update_fields=['last_login_ip'])
 
             token, created = Token.objects.get_or_create(user=user)
             return Response({
@@ -1057,6 +1095,94 @@ class AdminDownlineOverviewView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class AdminDecodeApiResponseView(APIView):
+    permission_classes = (IsAuthenticated, IsAdminUser,)
+    skip_response_encoding = True
+
+    @extend_schema(
+        tags=[ADMIN_TAG],
+        description='Admin: decode salted base64 API response for debugging',
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'payload': {'type': 'string', 'description': 'Raw response body or encoded data field'},
+                    'data': {'type': 'string', 'description': 'Alternative key for encoded data'},
+                },
+                'required': ['payload'],
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description='Decoded response',
+                examples=[
+                    OpenApiExample(
+                        'Decoded JSON',
+                        value={
+                            'decoded_text': '{"foo": "bar"}',
+                            'decoded_json': {'foo': 'bar'},
+                        },
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description='Invalid payload',
+                examples=[
+                    OpenApiExample(
+                        'Invalid Payload',
+                        value={'detail': 'Payload harus berupa string terenkripsi'},
+                    )
+                ],
+            ),
+        },
+    )
+    def post(self, request):
+        raw_payload = request.data.get('payload')
+        if raw_payload is None:
+            raw_payload = request.data.get('data')
+        if raw_payload is None:
+            return Response({'detail': 'Field \"payload\" atau \"data\" wajib diisi'}, status=status.HTTP_400_BAD_REQUEST)
+        text = raw_payload
+        if isinstance(raw_payload, dict) and 'data' in raw_payload:
+            text = raw_payload['data']
+        elif isinstance(raw_payload, str):
+            stripped = raw_payload.strip()
+            if stripped.startswith('{'):
+                try:
+                    obj = json.loads(stripped)
+                    if isinstance(obj, dict) and 'data' in obj:
+                        text = obj['data']
+                    else:
+                        text = raw_payload
+                except ValueError:
+                    text = raw_payload
+        if not isinstance(text, str):
+            return Response({'detail': 'Payload harus berupa string terenkripsi'}, status=status.HTTP_400_BAD_REQUEST)
+        encoded = text.strip()
+        salt = getattr(settings, "RESPONSE_ENCODE_SALT", "")
+        try:
+            rev = encoded[::-1]
+            if salt:
+                if len(rev) <= len(salt):
+                    return Response({'detail': 'Data terlalu pendek untuk salt yang dikonfigurasi'}, status=status.HTTP_400_BAD_REQUEST)
+                uns = rev[:-len(salt)]
+            else:
+                uns = rev
+            raw_bytes = base64.b64decode(uns.encode("ascii"))
+        except Exception as exc:
+            return Response({'detail': 'Gagal decode base64+salt', 'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            decoded_text = raw_bytes.decode("utf-8")
+        except Exception as exc:
+            return Response({'detail': 'Gagal decode bytes ke UTF-8', 'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        decoded_json = None
+        try:
+            decoded_json = json.loads(decoded_text)
+        except Exception:
+            decoded_json = None
+        return Response({'decoded_text': decoded_text, 'decoded_json': decoded_json}, status=status.HTTP_200_OK)
+
+
 # Django Template Views for Testing
 @csrf_protect
 def user_login(request):
@@ -1488,11 +1614,16 @@ class PhoneTokenObtainPairSerializer(TokenObtainPairSerializer):
         password = attrs.get('password')
         if not phone or not password:
             raise AuthenticationFailed('Please provide both phone and password')
-        user = authenticate(request=self.context.get('request'), username=phone, password=password)
+        request = self.context.get('request')
+        user = authenticate(request=request, username=phone, password=password)
         if not user:
             raise AuthenticationFailed('Invalid phone number or password')
         if not user.is_active:
             raise AuthenticationFailed('User account is disabled')
+        ip = _get_request_ip(request) if request is not None else None
+        if ip:
+            user.last_login_ip = ip
+            user.save(update_fields=['last_login_ip'])
         self.user = user
         refresh = self.get_token(user)
         return {

@@ -1,7 +1,7 @@
 bind = '127.0.0.1:8000'
 
 # Server 8 vCPU → ambil 12 worker (aman, stabil, tidak boros RAM)
-workers = 6
+workers = 10
 worker_class = 'sync'
 
 # sync worker tidak pakai threads

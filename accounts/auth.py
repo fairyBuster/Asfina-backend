@@ -1,5 +1,6 @@
 from django.contrib.auth.backends import ModelBackend
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 User = get_user_model()
 
@@ -11,21 +12,18 @@ class PhoneOrUsernameBackend(ModelBackend):
     """
     
     def authenticate(self, request, username=None, password=None, **kwargs):
-        # For admin interface, always try username first
-        if request and request.path.startswith('/admin/'):
+        admin_base = f"/{getattr(settings, 'ADMIN_URL', 'admin').strip('/')}"
+        if request and (request.path == admin_base or request.path.startswith(admin_base + "/")):
             try:
                 user = User.objects.get(username=username)
                 if user.check_password(password):
                     return user
             except User.DoesNotExist:
                 return None
-        
-        # For API/regular users, try phone number
         try:
             user = User.objects.get(phone=username)
             if user.check_password(password):
                 return user
         except User.DoesNotExist:
             return None
-            
         return None

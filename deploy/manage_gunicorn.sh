@@ -54,7 +54,11 @@ start() {
   # Jalankan dalam shell www-data supaya redireksi log dilakukan oleh www-data
   # serta file PID dibuat di dalam RUN_DIR dengan izin yang benar
   echo "Using Gunicorn binary: $GUNICORN_BIN" >> "$LOG_DIR/gunicorn.out"
-  sudo -u www-data bash -lc "umask 007; nohup $GUNICORN_CMD --pid '$PID_FILE' >> '$LOG_DIR/gunicorn.out' 2>> '$LOG_DIR/gunicorn.err' &" || true
+  if id -u www-data >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+    sudo -u www-data bash -lc "umask 007; nohup $GUNICORN_CMD --pid '$PID_FILE' >> '$LOG_DIR/gunicorn.out' 2>> '$LOG_DIR/gunicorn.err' &"
+  else
+    bash -lc "umask 007; nohup $GUNICORN_CMD --pid '$PID_FILE' >> '$LOG_DIR/gunicorn.out' 2>> '$LOG_DIR/gunicorn.err' &"
+  fi
   # Wait for PID file and port listen
   for i in {1..50}; do
     if [[ -f "$PID_FILE" ]]; then

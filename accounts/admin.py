@@ -9,7 +9,10 @@ from .models import User
 from .views import AdminDownlineOverviewView
 from django import forms
 from decimal import Decimal
-from .models import User, GeneralSetting, RankLevel, UserAddress, PhoneOTP
+from .models import User, GeneralSetting, RankLevel, UserAddress, PhoneOTP, AdminDecodeTool
+import base64
+import json
+from django.conf import settings
 
 
 @admin.register(PhoneOTP)
@@ -83,6 +86,9 @@ class UserAdmin(BaseUserAdmin):
             path('downline-overview/',
                  self.admin_site.admin_view(self.downline_overview),
                  name='accounts_user_downline_overview_admin'),
+            path('decode-response/',
+                 self.admin_site.admin_view(self.decode_response_tool),
+                 name='accounts_user_decode_response'),
         ]
         return custom_urls + urls
     
@@ -322,6 +328,53 @@ class UserAdmin(BaseUserAdmin):
                 }
 
         return render(request, 'accounts/admin_downline_overview.html', context)
+    
+    def decode_response_tool(self, request):
+        payload = ''
+        decoded_text = None
+        decoded_json = None
+        error = None
+        if request.method == 'POST':
+            payload = request.POST.get('payload', '').strip()
+            if not payload:
+                error = 'Payload wajib diisi'
+            else:
+                text = payload
+                try:
+                    obj = json.loads(payload)
+                    if isinstance(obj, dict) and isinstance(obj.get('data'), str):
+                        text = obj['data']
+                except ValueError:
+                    text = payload
+                encoded = text.strip()
+                salt = getattr(settings, "RESPONSE_ENCODE_SALT", "")
+                try:
+                    rev = encoded[::-1]
+                    if salt:
+                        if len(rev) <= len(salt):
+                            error = 'Data terlalu pendek untuk salt yang dikonfigurasi'
+                        else:
+                            uns = rev[:-len(salt)]
+                    else:
+                        uns = rev
+                    if error is None:
+                        raw_bytes = base64.b64decode(uns.encode("ascii"))
+                        decoded_text = raw_bytes.decode("utf-8")
+                        try:
+                            obj = json.loads(decoded_text)
+                            decoded_json = json.dumps(obj, indent=2, ensure_ascii=False)
+                        except Exception:
+                            decoded_json = None
+                except Exception as exc:
+                    error = f'Gagal decode: {exc}'
+        context = {
+            'title': 'Decode API Response',
+            'payload': payload,
+            'decoded_text': decoded_text,
+            'decoded_json': decoded_json,
+            'error': error,
+        }
+        return render(request, 'accounts/admin_decode_response.html', context)
         
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "referral_by":
@@ -423,3 +476,19 @@ class UserAddressAdmin(admin.ModelAdmin):
     search_fields = ('user__phone', 'user__email', 'recipient_name', 'phone_number', 'address_details')
     list_filter = ('is_primary', 'created_at')
     raw_id_fields = ('user',)
+
+
+@admin.register(AdminDecodeTool)
+class AdminDecodeToolAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        url = reverse('admin:accounts_user_decode_response')
+        return redirect(url)

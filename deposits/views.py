@@ -53,7 +53,7 @@ class JayapayDepositInitiateView(APIView):
         },
     )
     def post(self, request):
-        gs = GatewaySettings.objects.first()
+        gs = GatewaySettings.objects.order_by('-updated_at').first()
         # Gunakan konfigurasi dari admin saja (tanpa fallback .env)
         jayapay_enabled = bool(gs and gs.jayapay_enabled)
         merchant_code = (gs.jayapay_merchant_code or '').strip() if gs else ''
@@ -67,7 +67,7 @@ class JayapayDepositInitiateView(APIView):
         if not app_domain:
             return Response({'detail': 'Konfigurasi domain untuk callback belum diisi'}, status=status.HTTP_400_BAD_REQUEST)
 
-        wallet_type = request.data.get('wallet_type') or (gs.default_wallet_type if gs else 'BALANCE')
+        wallet_type = (gs.default_wallet_type if gs and gs.default_wallet_type else 'BALANCE')
         if wallet_type not in ('BALANCE', 'BALANCE_DEPOSIT'):
             return Response({'detail': 'wallet_type tidak valid'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -179,7 +179,7 @@ class JayapayDepositCallbackView(APIView):
     throttle_scope = 'gateway_callback'
 
     def post(self, request):
-        gs = GatewaySettings.objects.first()
+        gs = GatewaySettings.objects.order_by('-updated_at').first()
         callback = request.data
         code = callback.get('code')
         msg = callback.get('msg')
@@ -268,7 +268,7 @@ class KlikpayDepositInitiateView(APIView):
         },
     )
     def post(self, request):
-        gs = GatewaySettings.objects.first()
+        gs = GatewaySettings.objects.order_by('-updated_at').first()
         klikpay_enabled = bool(gs and gs.klikpay_enabled)
         api_url = (gs.klikpay_api_url or '').strip() if gs else ''
         merchant_code = (gs.klikpay_merchant_code or '').strip() if gs else ''
@@ -282,10 +282,8 @@ class KlikpayDepositInitiateView(APIView):
             return Response({'detail': 'Konfigurasi Klikpay belum lengkap'}, status=status.HTTP_400_BAD_REQUEST)
         if not app_domain:
             return Response({'detail': 'Konfigurasi domain untuk callback belum diisi'}, status=status.HTTP_400_BAD_REQUEST)
-
-        wallet_type = request.data.get('wallet_type') or (gs.default_wallet_type if gs else 'BALANCE')
-        if wallet_type not in ('BALANCE', 'BALANCE_DEPOSIT'):
-            return Response({'detail': 'wallet_type tidak valid'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        wallet_type = 'BALANCE_DEPOSIT'
 
         amount_raw = request.data.get('amount')
         try:

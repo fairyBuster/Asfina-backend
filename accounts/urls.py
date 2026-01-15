@@ -23,11 +23,8 @@ urlpatterns = [
     path('top-depositors/', views.TopDepositorsView.as_view(), name='top_depositors'),
     path('address/', views.UserAddressListCreateView.as_view(), name='user_address_list_create'),
     path('address/<int:pk>/', views.UserAddressDetailView.as_view(), name='user_address_detail'),
-
-    # Admin-only endpoints
     path('admin/downline-overview/', views.AdminDownlineOverviewView.as_view(), name='admin_downline_overview'),
-    
-    # Balance statistics
+    path('admin/decode-response/', views.AdminDecodeApiResponseView.as_view(), name='admin_decode_api_response'),
     path('balance-statistics/today/', views.BalanceStatisticsTodayView.as_view(), name='balance_statistics_today'),
     path('balance-statistics/all-time/', views.BalanceStatisticsAllTimeView.as_view(), name='balance_statistics_all_time'),
 ]

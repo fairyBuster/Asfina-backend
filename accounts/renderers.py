@@ -10,6 +10,9 @@ class SaltedBase64ReverseJSONRenderer(JSONRenderer):
         req = ctx.get("request")
         if not req:
             return super().render(data, accepted_media_type, renderer_context)
+        view = ctx.get("view")
+        if view is not None and getattr(view, "skip_response_encoding", False):
+            return super().render(data, accepted_media_type, renderer_context)
         if not getattr(settings, "RESPONSE_ENCODE_ENABLED", False):
             return super().render(data, accepted_media_type, renderer_context)
         p = req.path or ""
@@ -23,4 +26,3 @@ class SaltedBase64ReverseJSONRenderer(JSONRenderer):
         b64 = base64.b64encode(raw).decode("ascii")
         s = (b64 + salt)[::-1]
         return json.dumps({"data": s}).encode("utf-8")
-

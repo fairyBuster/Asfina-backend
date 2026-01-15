@@ -115,12 +115,25 @@ class AccountInfoSerializer(serializers.ModelSerializer):
     def get_ip_address(self, obj):
         request = self.context.get('request')
         if request:
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            meta = request.META
+            forwarded_client_ip = meta.get('HTTP_X_ORIGINAL_CLIENT_IP') or meta.get('HTTP_X_CLIENT_IP')
+            if forwarded_client_ip and '{' not in forwarded_client_ip and '}' not in forwarded_client_ip:
+                return forwarded_client_ip
+            cf_ip = meta.get('HTTP_CF_CONNECTING_IP')
+            if cf_ip and '{' not in cf_ip and '}' not in cf_ip:
+                return cf_ip
+            x_forwarded_for = meta.get('HTTP_X_FORWARDED_FOR')
             if x_forwarded_for:
-                ip = x_forwarded_for.split(',')[0]
-            else:
-                ip = request.META.get('REMOTE_ADDR')
-            return ip
+                ip = x_forwarded_for.split(',')[0].strip()
+                if ip and '{' not in ip and '}' not in ip:
+                    return ip
+            x_real_ip = meta.get('HTTP_X_REAL_IP')
+            if x_real_ip and '{' not in x_real_ip and '}' not in x_real_ip:
+                return x_real_ip
+            ip = meta.get('REMOTE_ADDR')
+            if ip and '{' not in ip and '}' not in ip:
+                return ip
+            return None
         return None
 
     def get_referral_by_username(self, obj):
@@ -429,5 +442,3 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         if User.objects.filter(username=value).exclude(id=user.id).exists():
             raise serializers.ValidationError("Username sudah digunakan oleh user lain.")
         return value
-
-

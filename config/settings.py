@@ -29,15 +29,13 @@ load_dotenv(BASE_DIR / '.env', override=True)
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-&_)yq3essw31tdnp_dpq+t-r2xwbl#m2bvo*nocw7871_xg$x@')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-# Force default to False; can be overridden via env DEBUG=true if needed
 DEBUG = os.environ.get('DEBUG', 'True').strip().lower() in ('true', '1', 'yes', 'on')
 
 # Security: Restrict allowed hosts
 ALLOWED_HOSTS = [
     host.strip() for host in os.environ.get(
         'ALLOWED_HOSTS',
-        'localhost,127.0.0.1,api.ggeeccss.xyz,ggeecsxio.com'
+        'localhost,127.0.0.1,appgoldare.online,www.appgoldare.online'
     ).split(',') if host.strip()
 ]
 
@@ -118,8 +116,12 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+VALID_PG_SSLMODES = {'disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'}
+DATABASE_SSLMODE = os.environ.get('DATABASE_SSLMODE', 'require').strip().lower()
+if DATABASE_SSLMODE in {'enable', 'enabled', 'on', 'true', '1'}:
+    DATABASE_SSLMODE = 'require'
+if DATABASE_SSLMODE not in VALID_PG_SSLMODES:
+    DATABASE_SSLMODE = 'require'
 
 DATABASES = {
     'default': {
@@ -133,8 +135,7 @@ DATABASES = {
         'DISABLE_SERVER_SIDE_CURSORS': True,
         'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
         'OPTIONS': {
-            # Use SSL for Neon pooler
-            'sslmode': os.environ.get('DATABASE_SSLMODE', 'require').strip(),
+            'sslmode': DATABASE_SSLMODE,
         }
     }
 }

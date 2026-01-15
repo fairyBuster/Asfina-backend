@@ -93,17 +93,14 @@ class DomainIPSecurityMiddleware:
         return ranges
     
     def _should_skip_security_check(self, request):
-        """Determine if security check should be skipped for certain paths"""
         skip_paths = [
-            # '/admin/' handled via regex below to also match '/admin'
             '/static/',
             '/media/',
             '/favicon.ico',
         ]
-        
         path = request.path or ''
-        # Bypass for Django admin: match '/admin' and any subpath like '/admin/...'
-        if re.match(r'^/admin(?:/|$)', path):
+        admin_base = f"/{getattr(settings, 'ADMIN_URL', 'admin').strip('/')}"
+        if path == admin_base or path.startswith(admin_base + "/"):
             return True
         return any(path.startswith(skip_path) for skip_path in skip_paths)
     
@@ -131,15 +128,25 @@ class DomainIPSecurityMiddleware:
     
     def _get_client_ip(self, request):
         """Get the real client IP address"""
-        # Check for forwarded IP (behind proxy/load balancer)
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        meta = request.META
+        forwarded_client_ip = meta.get('HTTP_X_ORIGINAL_CLIENT_IP') or meta.get('HTTP_X_CLIENT_IP')
+        if forwarded_client_ip and '{' not in forwarded_client_ip and '}' not in forwarded_client_ip:
+            return forwarded_client_ip
+        cf_ip = meta.get('HTTP_CF_CONNECTING_IP')
+        if cf_ip and '{' not in cf_ip and '}' not in cf_ip:
+            return cf_ip
+        x_forwarded_for = meta.get('HTTP_X_FORWARDED_FOR')
         if x_forwarded_for:
-            # Take the first IP in the chain
             ip = x_forwarded_for.split(',')[0].strip()
-        else:
-            ip = request.META.get('REMOTE_ADDR', '')
-        
-        return ip
+            if ip and '{' not in ip and '}' not in ip:
+                return ip
+        x_real_ip = meta.get('HTTP_X_REAL_IP')
+        if x_real_ip and '{' not in x_real_ip and '}' not in x_real_ip:
+            return x_real_ip
+        ip = meta.get('REMOTE_ADDR', '')
+        if ip and '{' not in ip and '}' not in ip:
+            return ip
+        return ''
     
     def _is_ip_allowed(self, client_ip):
         """Check if client IP is in allowed IPs or IP ranges"""

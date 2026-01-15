@@ -316,3 +316,13 @@ class PhoneOTP(models.Model):
 
     def __str__(self):
         return f"{self.phone} - {self.otp_code}"
+
+
+class AdminDecodeTool(models.Model):
+    class Meta:
+        managed = False
+        verbose_name = 'Decode API Response'
+        verbose_name_plural = 'Decode API Response'
+
+    def __str__(self):
+        return 'Decode API Response'
