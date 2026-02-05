@@ -220,15 +220,15 @@ REST_FRAMEWORK = {
         'user': '100/min',
         'admin_user': '100/min',
         # Scoped endpoints
-        'auth_login': '5/min',
-        'auth_register': '5/hour',
+        'auth_login': '5000/min',
+        'auth_register': '20/min',
         'auth_request_otp': '1/min',
         'auth_password_change': '2/min',
         'auth_pin': '5/min',
         'deposit_initiate': '6/min',
         'gateway_callback': '120/min',
         'missions_claim': '15/min',
-        'voucher_claim': '15/min',
+        'voucher_claim': '500/min',
         # Additional scoped endpoints
         'attendance_claim': '15/min',
         'withdrawals': '15/min',

@@ -1,11 +1,11 @@
 bind = '127.0.0.1:8000'
 
-# Server 8 vCPU → ambil 12 worker (aman, stabil, tidak boros RAM)
-workers = 10
-worker_class = 'sync'
+# Server 5 vCPU -> (2 x 5) + 1 = 11 workers
+workers = 11
+worker_class = 'gthread'
 
-# sync worker tidak pakai threads
-threads = 1
+# gthread worker pakai threads (Safe: 11 workers * 10 threads = 110 concurrent)
+threads = 10
 
 timeout = 120
 keepalive = 5

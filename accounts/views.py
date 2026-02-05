@@ -1634,8 +1634,8 @@ class PhoneTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class PhoneTokenObtainPairView(TokenObtainPairView):
     permission_classes = (AllowAny,)
-    throttle_classes = api_settings.DEFAULT_THROTTLE_CLASSES
-    throttle_scope = 'auth_login'
+    throttle_classes = []
+    # throttle_scope = 'auth_login'
     serializer_class = PhoneTokenObtainPairSerializer
 
     @extend_schema(

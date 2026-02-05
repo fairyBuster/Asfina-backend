@@ -18,6 +18,8 @@ from .serializers import (
 from products.models import Transaction
 
 
+from django.contrib.auth import get_user_model
+
 class VoucherListView(APIView):
     @extend_schema(
         tags=["User API"],
@@ -52,61 +54,69 @@ class ClaimVoucherView(APIView):
         serializer = ClaimVoucherSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         code = serializer.validated_data['code']
-
-        try:
-            voucher = Voucher.objects.get(code=code)
-        except Voucher.DoesNotExist:
-            return Response({'error': 'Voucher tidak ditemukan'}, status=status.HTTP_404_NOT_FOUND)
-
-        # Validate voucher
-        if not voucher.is_active:
-            return Response({'error': 'Voucher tidak aktif'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if voucher.expires_at and timezone.now() >= voucher.expires_at:
-            return Response({'error': 'Voucher sudah kedaluwarsa'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if voucher.used_count >= voucher.usage_limit:
-            return Response({'error': 'Voucher telah mencapai batas penggunaan'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Enforce one-time usage per user per voucher code
-        if VoucherUsage.objects.filter(voucher=voucher, user=request.user).exists():
-            return Response({'error': 'Voucher ini sudah digunakan oleh akun Anda'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Calculate amount mirroring attendance types
-        from decimal import Decimal
-        import random
-
-        user = request.user
-
-        if voucher.type == 'fixed':
-            base_amount = Decimal(voucher.amount or 0)
-        elif voucher.type == 'random':
-            min_amt = Decimal(voucher.min_amount or 0)
-            max_amt = Decimal(voucher.max_amount or 0)
-            if max_amt < min_amt:
-                max_amt = min_amt
-            rand_float = random.uniform(float(min_amt), float(max_amt))
-            base_amount = Decimal(str(rand_float)).quantize(Decimal('0.01'))
-        elif voucher.type == 'rank':
-            rank_key = str(user.rank or '').strip()
-            amount_from_rank = None
-            if rank_key:
-                try:
-                    amount_from_rank = Decimal(str((voucher.rank_rewards or {}).get(rank_key, 0)))
-                except Exception:
-                    amount_from_rank = Decimal('0')
-            base_amount = amount_from_rank if amount_from_rank and amount_from_rank > 0 else Decimal(voucher.amount or 0)
-        else:
-            base_amount = Decimal(voucher.amount or 0)
-
-        amount = base_amount
-
-        if amount <= 0:
-            return Response({'error': 'Nominal voucher tidak valid'}, status=status.HTTP_400_BAD_REQUEST)
-
-        balance_field = 'balance' if voucher.balance_type == 'BALANCE' else 'balance_deposit'
-
+        
+        # Use atomic transaction with select_for_update to prevent race conditions
         with db_transaction.atomic():
+            User = get_user_model()
+            # Lock the user row to prevent concurrent claims by the same user
+            try:
+                user = User.objects.select_for_update().get(pk=request.user.pk)
+            except User.DoesNotExist:
+                # Should not happen if authenticated
+                return Response({'error': 'User invalid'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Lock the voucher row to handle global usage limits correctly
+            try:
+                voucher = Voucher.objects.select_for_update().get(code=code)
+            except Voucher.DoesNotExist:
+                return Response({'error': 'Voucher tidak ditemukan'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Validate voucher
+            if not voucher.is_active:
+                return Response({'error': 'Voucher tidak aktif'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if voucher.expires_at and timezone.now() >= voucher.expires_at:
+                return Response({'error': 'Voucher sudah kedaluwarsa'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if voucher.used_count >= voucher.usage_limit:
+                return Response({'error': 'Voucher telah mencapai batas penggunaan'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Enforce one-time usage per user per voucher code
+            if VoucherUsage.objects.filter(voucher=voucher, user=user).exists():
+                return Response({'error': 'Voucher ini sudah digunakan oleh akun Anda'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Calculate amount mirroring attendance types
+            from decimal import Decimal
+            import random
+
+            if voucher.type == 'fixed':
+                base_amount = Decimal(voucher.amount or 0)
+            elif voucher.type == 'random':
+                min_amt = Decimal(voucher.min_amount or 0)
+                max_amt = Decimal(voucher.max_amount or 0)
+                if max_amt < min_amt:
+                    max_amt = min_amt
+                rand_float = random.uniform(float(min_amt), float(max_amt))
+                base_amount = Decimal(str(rand_float)).quantize(Decimal('0.01'))
+            elif voucher.type == 'rank':
+                rank_key = str(user.rank or '').strip()
+                amount_from_rank = None
+                if rank_key:
+                    try:
+                        amount_from_rank = Decimal(str((voucher.rank_rewards or {}).get(rank_key, 0)))
+                    except Exception:
+                        amount_from_rank = Decimal('0')
+                base_amount = amount_from_rank if amount_from_rank and amount_from_rank > 0 else Decimal(voucher.amount or 0)
+            else:
+                base_amount = Decimal(voucher.amount or 0)
+
+            amount = base_amount
+
+            if amount <= 0:
+                return Response({'error': 'Nominal voucher tidak valid'}, status=status.HTTP_400_BAD_REQUEST)
+
+            balance_field = 'balance' if voucher.balance_type == 'BALANCE' else 'balance_deposit'
+
             # Credit balance
             current_balance = getattr(user, balance_field)
             setattr(user, balance_field, current_balance + amount)
