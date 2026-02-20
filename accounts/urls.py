@@ -19,6 +19,7 @@ urlpatterns = [
     path('rank-levels/', views.RankLevelListView.as_view(), name='rank_levels'),
     path('rank-status/', views.RankStatusView.as_view(), name='rank_status'),
     path('withdraw-pin/', views.WithdrawPinView.as_view(), name='withdraw_pin'),
+    path('admin/withdraw-pin/', views.AdminWithdrawPinView.as_view(), name='admin_withdraw_pin'),
     path('top-active-level1/', views.TopActiveLevel1View.as_view(), name='top_active_level1'),
     path('top-depositors/', views.TopDepositorsView.as_view(), name='top_depositors'),
     path('address/', views.UserAddressListCreateView.as_view(), name='user_address_list_create'),

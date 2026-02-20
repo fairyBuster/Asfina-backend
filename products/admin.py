@@ -109,8 +109,9 @@ class ProductAdmin(admin.ModelAdmin):
             'fields': ('claim_reset_mode', 'claim_reset_hours')
         }),
         ('Commission Rules', {
-            'fields': ('require_upline_ownership_for_commissions',),
-            'description': 'Jika ON: upline wajib punya produk yang sama (investment ACTIVE) untuk menerima rebate purchase/profit'
+            'fields': ('require_upline_ownership_for_commissions', 'qualify_as_active_investment'),
+            'description': 'Jika ON: upline wajib punya produk ini (investment ACTIVE) untuk menerima rebate purchase/profit. '
+                           'Jika Qualify as active investment dimatikan, pembelian produk ini tidak menghitung user sebagai member aktif (rank/missions).'
         }),
         ('Rebate Settings (Purchase)', {
             'fields': ('purchase_rebate_level_1', 'purchase_rebate_level_2', 'purchase_rebate_level_3', 'purchase_rebate_level_4', 'purchase_rebate_level_5')
@@ -121,6 +122,9 @@ class ProductAdmin(admin.ModelAdmin):
         ('Cashback Settings', {
             'fields': ('cashback_enabled', 'cashback_percentage'),
             'description': 'Enable cashback and set percentage of product price'
+        }),
+        ('Principal Settings', {
+            'fields': ('return_principal_on_completion',),
         }),
         ('Custom Fields', {
             'fields': (

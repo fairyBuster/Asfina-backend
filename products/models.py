@@ -1,7 +1,9 @@
-from django.db import models
+from django.db import models, transaction as db_transaction
 from django.core.validators import MinValueValidator
 from django.conf import settings
+from django.utils import timezone
 import json
+import uuid
 
 class Product(models.Model):
     BALANCE_CHOICES = [
@@ -65,6 +67,10 @@ class Product(models.Model):
         default=False,
         help_text='Jika ON, upline harus memiliki produk ini (investment ACTIVE) untuk menerima purchase/profit commission'
     )
+    qualify_as_active_investment = models.BooleanField(
+        default=True,
+        help_text='Jika OFF, pembelian produk ini tidak membuat user dihitung sebagai member aktif (rank, missions, dsb)'
+    )
     
     # Rebate Settings
     purchase_rebate_level_1 = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -90,6 +96,7 @@ class Product(models.Model):
     
     # Additional Settings
     image = models.ImageField(upload_to='products/', null=True, blank=True)
+    return_principal_on_completion = models.BooleanField(default=False)
     
     # Custom Fields
     # Ten custom fields (title + content), optional use
@@ -165,6 +172,7 @@ class Transaction(models.Model):
         ('INVESTMENTS', 'Investments'),
         ('CASHBACK', 'Cashback'),
         ('REJECT', 'Reject'),
+        ('RETURN', 'Return'),
     ]
     
     STATUS_CHOICES = [
@@ -279,6 +287,7 @@ class Investment(models.Model):
     
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
+    principal_returned = models.BooleanField(default=False)
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -357,21 +366,20 @@ class Investment(models.Model):
             expected_next = self.calculate_next_claim_time()
             return timezone.now() >= expected_next
         
-        # Check if already claimed today (for manual claims)
-        if self.last_claim_time:
-            if self.claim_reset_mode == 'at_00':
-                # Can claim once per day (resets at midnight)
-                from django.utils import timezone
-                # Gunakan tanggal lokal sesuai TIME_ZONE agar reset jam 00 lokal (Asia/Jakarta) berlaku
+        from django.utils import timezone
+        
+        if self.claim_reset_mode == 'at_00':
+            if self.last_claim_time:
                 today = timezone.localdate()
                 last_claim_date = timezone.localtime(self.last_claim_time).date()
                 return today > last_claim_date
-            else:
-                # Can claim after specific hours from last claim
-                from django.utils import timezone
-                if self.next_claim_time and timezone.now() < self.next_claim_time:
-                    return False
-        return True
+            return True
+        
+        if self.next_claim_time:
+            return timezone.now() >= self.next_claim_time
+        
+        expected_next = self.calculate_next_claim_time()
+        return timezone.now() >= expected_next
     
     def can_claim_manually(self):
         """Check if user can manually claim profit (excludes auto method)"""
@@ -439,24 +447,55 @@ class Investment(models.Model):
             return self.calculate_next_claim_time()
     
     def update_remaining_days(self):
-        """Update remaining days based on claim count and time"""
-        from django.utils import timezone
-        
-        # Time-based remaining days
         days_passed = (timezone.now().date() - self.created_at.date()).days
         days_remaining_by_time = max(0, self.duration_days - days_passed)
-        
-        # Count-based remaining claims (count-first policy)
         claims_remaining = max(0, self.duration_days - self.claims_count)
-        
-        # Keep claims_remaining in sync and enforce count-first cap
         self.claims_remaining = claims_remaining
         self.remaining_days = min(days_remaining_by_time, claims_remaining)
-        
         if self.remaining_days <= 0 and self.status == 'ACTIVE':
             self.status = 'COMPLETED'
-        
         self.save(update_fields=['remaining_days', 'claims_remaining', 'status'])
+
+    def return_principal_if_eligible(self):
+        if not getattr(self.product, 'return_principal_on_completion', False):
+            return None
+        if self.principal_returned:
+            return None
+        if not self.transaction:
+            return None
+        wallet_type = self.transaction.wallet_type
+        if wallet_type == 'BALANCE':
+            wallet_field = 'balance'
+        elif wallet_type == 'BALANCE_DEPOSIT':
+            wallet_field = 'balance_deposit'
+        else:
+            return None
+        amount = self.total_amount
+        user = self.user
+        with db_transaction.atomic():
+            current_value = getattr(user, wallet_field)
+            setattr(user, wallet_field, current_value + amount)
+            user.save(update_fields=[wallet_field])
+            trx = Transaction.objects.create(
+                user=user,
+                product=self.product,
+                upline_user=None,
+                trx_id=f'INVRET-{timezone.now().strftime("%Y%m%d%H%M%S")}-{uuid.uuid4().hex[:6].upper()}',
+                type='RETURN',
+                amount=amount,
+                description=f'Principal return for {self.product.name} investment',
+                status='COMPLETED',
+                wallet_type=wallet_type,
+                related_transaction=self.transaction,
+            )
+            self.principal_returned = True
+            self.save(update_fields=['principal_returned'])
+            return {
+                'amount': amount,
+                'wallet_type': wallet_type,
+                'transaction_id': trx.trx_id,
+                'balance': getattr(user, wallet_field),
+            }
     
     class Meta:
         db_table = 'investments'

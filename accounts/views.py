@@ -37,7 +37,7 @@ ADMIN_TAG = "Admin API"
 from .serializers import (RegisterSerializer, UserSerializer, ChangePasswordByPhoneSerializer, 
                          AccountInfoSerializer, DownlineOverviewSerializer, DownlineMemberSerializer,
                          ProfileUpdateSerializer, DownlineStatsLevelSerializer, DownlineStatsResponseSerializer,
-                         WithdrawPinSerializer)
+                         WithdrawPinSerializer, AdminWithdrawPinSerializer)
 from .balance_serializers import BalanceStatisticsSerializer
 from products.models import Transaction, Investment
 from deposits.models import Deposit
@@ -756,7 +756,16 @@ class DownlineOverviewView(APIView):
                     .annotate(
                         total_investments=Count('id'),
                         total_investment_amount=Sum('total_amount'),
-                        active_investments=Count(Case(When(status='ACTIVE', then=1), output_field=IntegerField())),
+                        active_investments=Count(
+                            Case(
+                                When(
+                                    status='ACTIVE',
+                                    product__qualify_as_active_investment=True,
+                                    then=1,
+                                ),
+                                output_field=IntegerField(),
+                            )
+                        ),
                     )
                 }
 
@@ -783,7 +792,7 @@ class DownlineOverviewView(APIView):
                     m.total_investments = i.get('total_investments', 0) or 0
                     m.total_investment_amount = i.get('total_investment_amount', 0) or 0
                     m.active_investments = i.get('active_investments', 0) or 0
-                    m.is_active = (m.total_investments > 0)
+                    m.is_active = (m.active_investments > 0)
 
                     m.total_deposits = d.get('total_deposits', 0) or 0
                     m.total_deposit_amount = d.get('total_deposit_amount', 0) or 0
@@ -984,7 +993,16 @@ class AdminDownlineOverviewView(APIView):
                     .annotate(
                         total_investments=Count('id'),
                         total_investment_amount=Sum('total_amount'),
-                        active_investments=Count(Case(When(status='ACTIVE', then=1), output_field=IntegerField())),
+                        active_investments=Count(
+                            Case(
+                                When(
+                                    status='ACTIVE',
+                                    product__qualify_as_active_investment=True,
+                                    then=1,
+                                ),
+                                output_field=IntegerField(),
+                            )
+                        ),
                     )
                 }
 
@@ -1011,7 +1029,7 @@ class AdminDownlineOverviewView(APIView):
                     m.total_investments = i.get('total_investments', 0) or 0
                     m.total_investment_amount = i.get('total_investment_amount', 0) or 0
                     m.active_investments = i.get('active_investments', 0) or 0
-                    m.is_active = (m.total_investments > 0)
+                    m.is_active = (m.active_investments > 0)
 
                     m.total_deposits = d.get('total_deposits', 0) or 0
                     m.total_deposit_amount = d.get('total_deposit_amount', 0) or 0
@@ -1358,10 +1376,14 @@ class BalanceStatisticsView(APIView):
                     # Ambil referrals untuk level ini
                     ds = list(u.referrals.all())
                     level_users.extend(ds)
-                # Hitung aktif: punya investasi status ACTIVE
+                # Hitung aktif: punya investasi status ACTIVE dan produk yang menghitung sebagai member aktif
                 active_count = 0
                 for d in level_users:
-                    if Investment.objects.filter(user=d, status='ACTIVE').exists():
+                    if Investment.objects.filter(
+                        user=d,
+                        status='ACTIVE',
+                        product__qualify_as_active_investment=True,
+                    ).exists():
                         active_count += 1
                 if lvl == 1:
                     active_members_level_1 = active_count
@@ -1696,9 +1718,10 @@ class WithdrawPinView(APIView):
                 'type': 'object',
                 'properties': {
                     'pin': {'type': 'string', 'description': 'New PIN (6 digits)'},
-                    'current_pin': {'type': 'string', 'description': 'Current PIN (required if updating)', 'nullable': True},
+                    'current_pin': {'type': 'string', 'description': 'Current PIN (required if PIN is already set)', 'nullable': True},
+                    'password': {'type': 'string', 'description': 'Login password for confirmation'},
                 },
-                'required': ['pin']
+                'required': ['pin', 'password']
             }
         },
         responses={
@@ -1725,6 +1748,45 @@ class WithdrawPinView(APIView):
         return Response({'pin_set': bool(request.user.withdraw_pin)}, status=status.HTTP_200_OK)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
+class AdminWithdrawPinView(APIView):
+    permission_classes = (IsAdminUser,)
+    throttle_scope = 'auth_pin'
+    
+    @extend_schema(
+        tags=[ADMIN_TAG],
+        summary='Admin set or reset user withdrawal PIN',
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'user_id': {'type': 'integer', 'description': 'ID user (opsional jika pakai phone)'},
+                    'phone': {'type': 'string', 'description': 'Nomor HP user (opsional jika pakai user_id)'},
+                    'new_pin': {'type': 'string', 'description': 'PIN baru (6 digit)'},
+                },
+                'required': ['new_pin']
+            }
+        },
+        responses={
+            200: OpenApiResponse(description='Withdrawal PIN updated by admin', examples=[]),
+            400: OpenApiResponse(description='Validation error', examples=[]),
+            401: OpenApiResponse(description='Unauthorized', examples=[]),
+        }
+    )
+    def post(self, request):
+        serializer = AdminWithdrawPinSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(
+            {
+                'detail': 'Withdrawal PIN user berhasil diupdate oleh admin.',
+                'user_id': user.id,
+                'phone': user.phone,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
 class TopActiveLevel1View(APIView):
     permission_classes = (AllowAny,)
 
@@ -1743,6 +1805,7 @@ class TopActiveLevel1View(APIView):
             Investment.objects
             .filter(
                 status='ACTIVE',
+                product__qualify_as_active_investment=True,
                 user__referral_by__isnull=False,
                 user__referral_by__is_staff=False,
                 user__referral_by__is_superuser=False,

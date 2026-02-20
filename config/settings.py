@@ -84,6 +84,7 @@ MIDDLEWARE = [
     'config.encoded_path_middleware.EncodedApiPathMiddleware',
     'config.security_middleware.DomainIPSecurityMiddleware',  # Add security middleware
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'config.unauthorized_middleware.UnauthorizedBlankPageMiddleware',
@@ -228,7 +229,7 @@ REST_FRAMEWORK = {
         'deposit_initiate': '6/min',
         'gateway_callback': '120/min',
         'missions_claim': '15/min',
-        'voucher_claim': '500/min',
+        'voucher_claim': '30/min',
         # Additional scoped endpoints
         'attendance_claim': '15/min',
         'withdrawals': '15/min',

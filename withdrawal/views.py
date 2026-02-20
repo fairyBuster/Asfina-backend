@@ -1,8 +1,8 @@
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiParameter
-from .models import Withdrawal, WithdrawalSettings
-from .serializers import WithdrawalSerializer, WithdrawalSettingsSerializer
+from .models import Withdrawal, WithdrawalSettings, WithdrawalService
+from .serializers import WithdrawalSerializer, WithdrawalSettingsSerializer, WithdrawalServiceSerializer
 from django.conf import settings
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -29,6 +29,16 @@ class WithdrawalSettingsView(generics.RetrieveAPIView):
         return WithdrawalSettings.objects.order_by('-updated_at').first()
 
 
+class WithdrawalServiceListView(generics.ListAPIView):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = WithdrawalServiceSerializer
+    throttle_scope = 'withdrawals'
+
+    @extend_schema(summary='List withdrawal services (active)')
+    def get_queryset(self):
+        return WithdrawalService.objects.filter(is_active=True).order_by('sort_order', 'duration_hours', 'name')
+
+
 class WithdrawalListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = WithdrawalSerializer
@@ -53,6 +63,7 @@ class WithdrawalListCreateView(generics.ListCreateAPIView):
                     'amount': {'type': 'string', 'description': 'Withdrawal amount'},
                     'bank_account_id': {'type': 'integer', 'nullable': True},
                     'pin': {'type': 'string', 'description': '6-digit PIN if required', 'nullable': True},
+                    'service_id': {'type': 'integer', 'description': 'ID jasa withdraw', 'nullable': True},
                 },
                 'required': ['amount']
             }
@@ -260,11 +271,11 @@ class WithdrawalTransactionsListView(APIView):
         else:
             queryset = Transaction.objects.filter(Q(user=request.user) | Q(upline_user=request.user))
 
-        # Optimize queries
         queryset = queryset.select_related('user', 'product', 'upline_user').prefetch_related(
             'related_withdrawal',
             'related_withdrawal__bank_account',
-            'related_withdrawal__bank_account__bank'
+            'related_withdrawal__bank_account__bank',
+            'related_withdrawal__withdrawal_service',
         )
 
         # Hanya transaksi bertipe WITHDRAW

@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.forms import UserChangeForm
 from django.utils.html import format_html
 from django.urls import path, reverse
 from django.shortcuts import redirect
@@ -13,6 +14,18 @@ from .models import User, GeneralSetting, RankLevel, UserAddress, PhoneOTP, Admi
 import base64
 import json
 from django.conf import settings
+
+
+class UserAdminForm(UserChangeForm):
+    withdraw_pin_raw = forms.CharField(
+        required=False,
+        label='Withdraw PIN (admin set/reset)',
+        help_text='Isi 6 digit PIN baru untuk reset Withdraw PIN user. Kosongkan jika tidak mengubah.'
+    )
+    
+    class Meta(UserChangeForm.Meta):
+        model = User
+        fields = '__all__'
 
 
 @admin.register(PhoneOTP)
@@ -48,7 +61,7 @@ class UserAdmin(BaseUserAdmin):
     
     fieldsets = (
         (None, {'fields': ('username', 'email', 'password')}),
-        ('Personal Info', {'fields': ('full_name', 'phone')}),
+        ('Personal Info', {'fields': ('full_name', 'phone', 'withdraw_pin_raw')}),
         ('Balance', {'fields': ('balance', 'balance_deposit')}),
         ('Referral System', {'fields': ('referral_code', 'referral_by', 'rank', 'downline_overview_link')}),
         ('Account Status', {
@@ -67,6 +80,13 @@ class UserAdmin(BaseUserAdmin):
     )
     
     readonly_fields = ('created_at', 'updated_at', 'date_joined', 'last_login', 'last_login_ip', 'referral_code', 'downline_overview_link')
+    form = UserAdminForm
+    
+    def save_model(self, request, obj, form, change):
+        pin_raw = form.cleaned_data.get('withdraw_pin_raw') if hasattr(form, 'cleaned_data') else None
+        super().save_model(request, obj, form, change)
+        if pin_raw:
+            obj.set_withdraw_pin(pin_raw)
     
     def get_urls(self):
         urls = super().get_urls()
@@ -419,7 +439,7 @@ class GeneralSettingAdmin(admin.ModelAdmin):
             'fields': ('referral_code_case', 'referral_code_length', 'exclude_similar_chars', 'referral_code_pattern')
         }),
         ('Autentikasi', {
-            'fields': ('auto_login_on_register', 'registration_bonus_enabled', 'registration_bonus_amount', 'registration_bonus_wallet')
+            'fields': ('auto_login_on_register', 'registration_bonus_enabled', 'registration_bonus_amount', 'registration_bonus_wallet', 'require_withdraw_pin_on_register', 'require_withdraw_pin_on_purchase')
         }),
         ('WhatsApp OTP', {
             'fields': ('otp_enabled', 'verifynow_customer_id', 'verifynow_api_key', 'verifyway_api_key'),

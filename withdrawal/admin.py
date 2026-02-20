@@ -3,7 +3,7 @@ from django.conf import settings
 from django.urls import path, reverse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
-from .models import Withdrawal, WithdrawalSettings, WithdrawalJayapay
+from .models import Withdrawal, WithdrawalSettings, WithdrawalJayapay, WithdrawalService
 from .integrations.jayapay import build_params, sign_params, send_cash_request
 from .integrations.jayapay_banks import JAYAPAY_BANKS
 from django.utils.html import format_html
@@ -12,17 +12,15 @@ from django.utils.html import format_html
 @admin.register(Withdrawal)
 class WithdrawalAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'user', 'bank_account', 'amount', 'fee', 'net_amount', 'status_display', 'created_at'
+        'id', 'user', 'bank_account', 'withdrawal_service', 'amount', 'fee', 'net_amount', 'status_display', 'created_at'
     )
     list_filter = ('status', 'created_at')
     search_fields = ('user__phone', 'bank_account__account_number')
     readonly_fields = ('created_at', 'updated_at')
     actions = ['process_withdrawal_jayapay']
     change_form_template = 'admin/withdrawal/change_form.html'
-    # Speed up change form by avoiding full dropdown loads for large tables
     autocomplete_fields = ('user', 'bank_account', 'transaction')
-    # Optimize list queries
-    list_select_related = ('user', 'bank_account', 'transaction')
+    list_select_related = ('user', 'bank_account', 'transaction', 'withdrawal_service')
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -221,4 +219,20 @@ class WithdrawalSettingsAdmin(admin.ModelAdmin):
     )
     list_filter = ('is_active',)
     search_fields = ('required_product__name',)
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(WithdrawalService)
+class WithdrawalServiceAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'name',
+        'duration_hours',
+        'fee_percent',
+        'is_active',
+        'sort_order',
+        'updated_at',
+    )
+    list_filter = ('is_active',)
+    search_fields = ('name',)
     readonly_fields = ('created_at', 'updated_at')

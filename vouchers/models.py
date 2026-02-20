@@ -14,8 +14,14 @@ class Voucher(models.Model):
         ('rank', 'Rank Based'),
     ]
 
+    CLAIM_MODE_CHOICES = [
+        ('manual', 'Manual (Input Code)'),
+        ('automatic', 'Automatic (Click to Claim)'),
+    ]
+
     code = models.CharField(max_length=50, unique=True)
     type = models.CharField(max_length=20, choices=REWARD_TYPE_CHOICES, default='fixed')
+    claim_mode = models.CharField(max_length=20, choices=CLAIM_MODE_CHOICES, default='manual', help_text="Manual: User harus input kode (tidak muncul di list). Automatic: User tinggal klik (muncul di list).")
     # Base amount for 'fixed' or fallback
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     # Random range
@@ -28,6 +34,8 @@ class Voucher(models.Model):
     usage_limit = models.IntegerField(default=1)
     used_count = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    is_daily_claim = models.BooleanField(default=False, help_text="Jika aktif, user bisa klaim lagi besoknya (reset harian)")
+    start_at = models.DateTimeField(null=True, blank=True, help_text="Waktu mulai klaim voucher")
     expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

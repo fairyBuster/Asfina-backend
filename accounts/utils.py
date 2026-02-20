@@ -224,7 +224,11 @@ def calculate_user_rank_progress(user):
                     
                     total_downlines += len(ds)
                     for d in ds:
-                        if Investment.objects.filter(user=d, status='ACTIVE').exists():
+                        if Investment.objects.filter(
+                            user=d,
+                            status='ACTIVE',
+                            product__qualify_as_active_investment=True,
+                        ).exists():
                             active_downlines += 1
                             
                 current_level_users = next_level

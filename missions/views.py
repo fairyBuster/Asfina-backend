@@ -181,20 +181,24 @@ class ClaimMissionView(APIView):
                     .distinct()
                     .count()
                 )
-            if use_downlines_total or use_downlines_active:
-                current_level_users = [user]
-                total_downlines = 0
-                active_downlines = 0
-                for lvl in range(1, max(1, int(levels_upto)) + 1):
-                    next_level = []
-                    for u in current_level_users:
-                        ds = list(u.referrals.all())
-                        next_level.extend(ds)
-                        total_downlines += len(ds)
-                        for d in ds:
-                            if Investment.objects.filter(user=d, status='ACTIVE').exists():
-                                active_downlines += 1
-                    current_level_users = next_level
+                if use_downlines_total or use_downlines_active:
+                    current_level_users = [user]
+                    total_downlines = 0
+                    active_downlines = 0
+                    for lvl in range(1, max(1, int(levels_upto)) + 1):
+                        next_level = []
+                        for u in current_level_users:
+                            ds = list(u.referrals.all())
+                            next_level.extend(ds)
+                            total_downlines += len(ds)
+                            for d in ds:
+                                if Investment.objects.filter(
+                                    user=d,
+                                    status='ACTIVE',
+                                    product__qualify_as_active_investment=True,
+                                ).exists():
+                                    active_downlines += 1
+                        current_level_users = next_level
                 if use_downlines_total:
                     progress_candidates.append(total_downlines)
                 if use_downlines_active:

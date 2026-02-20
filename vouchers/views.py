@@ -28,10 +28,10 @@ class VoucherListView(APIView):
     )
     def get(self, request):
         now = timezone.now()
-        qs = Voucher.objects.filter(is_active=True).filter(
+        qs = Voucher.objects.filter(is_active=True, claim_mode='automatic').filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=now)
         )
-        serializer = VoucherSerializer(qs, many=True)
+        serializer = VoucherSerializer(qs, many=True, context={'request': request})
         return Response({
             'count': qs.count(),
             'results': serializer.data
@@ -75,15 +75,43 @@ class ClaimVoucherView(APIView):
             if not voucher.is_active:
                 return Response({'error': 'Voucher tidak aktif'}, status=status.HTTP_400_BAD_REQUEST)
 
+            if voucher.start_at and timezone.now() < voucher.start_at:
+                return Response({'error': 'Voucher belum dapat diklaim'}, status=status.HTTP_400_BAD_REQUEST)
+
             if voucher.expires_at and timezone.now() >= voucher.expires_at:
                 return Response({'error': 'Voucher sudah kedaluwarsa'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if voucher.used_count >= voucher.usage_limit:
-                return Response({'error': 'Voucher telah mencapai batas penggunaan'}, status=status.HTTP_400_BAD_REQUEST)
+            # Check global limit OR daily limit depending on mode
+            if voucher.is_daily_claim:
+                 jakarta_tz = ZoneInfo('Asia/Jakarta')
+                 now_local = timezone.now().astimezone(jakarta_tz)
+                 today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+                 
+                 # Count usage TODAY across ALL users for this voucher
+                 daily_usage_count = VoucherUsage.objects.filter(
+                     voucher=voucher, 
+                     used_at__gte=today_start_local
+                 ).count()
+                 
+                 if daily_usage_count >= voucher.usage_limit:
+                     return Response({'error': 'Kuota voucher harian telah habis'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                if voucher.used_count >= voucher.usage_limit:
+                    return Response({'error': 'Voucher telah mencapai batas penggunaan'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Enforce one-time usage per user per voucher code
-            if VoucherUsage.objects.filter(voucher=voucher, user=user).exists():
-                return Response({'error': 'Voucher ini sudah digunakan oleh akun Anda'}, status=status.HTTP_400_BAD_REQUEST)
+            # Enforce usage limit per user
+            if voucher.is_daily_claim:
+                jakarta_tz = ZoneInfo('Asia/Jakarta')
+                now_local = timezone.now().astimezone(jakarta_tz)
+                today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # Check if claimed today (in Jakarta time)
+                if VoucherUsage.objects.filter(voucher=voucher, user=user, used_at__gte=today_start_local).exists():
+                    return Response({'error': 'Anda sudah klaim voucher ini hari ini. Coba lagi besok.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Enforce one-time usage per user per voucher code (lifetime)
+                if VoucherUsage.objects.filter(voucher=voucher, user=user).exists():
+                    return Response({'error': 'Voucher ini sudah digunakan oleh akun Anda'}, status=status.HTTP_400_BAD_REQUEST)
 
             # Calculate amount mirroring attendance types
             from decimal import Decimal

@@ -2,7 +2,7 @@ from django.db.models import Sum, Count, Q
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import authenticate
-from .models import User, RankLevel, UserAddress
+from .models import User, RankLevel, UserAddress, GeneralSetting
 from products.models import Transaction, Investment
 from deposits.models import Deposit
 from django.core.exceptions import ValidationError
@@ -25,11 +25,12 @@ class RegisterSerializer(serializers.ModelSerializer):
     password2 = serializers.CharField(write_only=True, required=True)
     referral_code = serializers.CharField(required=False, allow_blank=True, write_only=True)
     otp = serializers.CharField(required=False, allow_blank=True, write_only=True, help_text='OTP code (required if OTP is enabled)')
+    withdraw_pin = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = User
-        fields = ('username', 'password', 'password2', 'email', 'full_name', 
-                 'phone', 'referral_code', 'otp')
+        fields = ('username', 'password', 'password2', 'email', 'full_name',
+                 'phone', 'referral_code', 'otp', 'withdraw_pin')
 
     def validate_phone(self, value):
         # Pass-through: jangan ubah nilai phone sama sekali
@@ -44,6 +45,14 @@ class RegisterSerializer(serializers.ModelSerializer):
         if User.objects.filter(phone=phone).exists():
             raise serializers.ValidationError({"phone": "This phone number is already in use."})
         
+        settings_obj = GeneralSetting.objects.order_by('-updated_at').first()
+        withdraw_pin = (attrs.get('withdraw_pin') or '').strip()
+        if settings_obj and settings_obj.require_withdraw_pin_on_register and not withdraw_pin:
+            raise serializers.ValidationError({"withdraw_pin": "Withdraw PIN wajib diisi saat pendaftaran."})
+        if withdraw_pin:
+            if not (len(withdraw_pin) == 6 and withdraw_pin.isdigit()):
+                raise serializers.ValidationError({"withdraw_pin": "Withdraw PIN harus 6 digit angka."})
+
         # Validate referral code if provided
         referral_code = attrs.pop('referral_code', None)
         if referral_code:
@@ -56,12 +65,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        # Pastikan rank default = 1 jika tidak diset
         validated_data.setdefault('rank', 1)
-        # Hapus field konfirmasi yang bukan kolom model sebelum create_user
         validated_data.pop('password2', None)
         validated_data.pop('otp', None)
+        withdraw_pin = (validated_data.pop('withdraw_pin', None) or '').strip()
         user = User.objects.create_user(**validated_data)
+        if withdraw_pin:
+            user.set_withdraw_pin(withdraw_pin)
         return user
 
 class ChangePasswordByPhoneSerializer(serializers.Serializer):
@@ -258,24 +268,34 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
 class WithdrawPinSerializer(serializers.Serializer):
     pin = serializers.CharField(write_only=True)
     current_pin = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         user = self.context['request'].user
         new_pin = (attrs.get('pin') or '').strip()
         current_pin = (attrs.get('current_pin') or '').strip()
+        password = (attrs.get('password') or '').strip()
 
-        # Require exactly 6 digits
+        # 1. Verify login password for security (Always required)
+        if not user.check_password(password):
+            raise serializers.ValidationError({'password': 'Kata sandi salah.'})
+
+        # 2. Require exactly 6 digits for new PIN
         if not (len(new_pin) == 6 and new_pin.isdigit()):
-            raise serializers.ValidationError({'pin': 'PIN must be exactly 6 digits.'})
+            raise serializers.ValidationError({'pin': 'PIN harus 6 digit angka.'})
 
-        # If PIN already set, require current_pin and verify
+        # 3. Validate Current PIN (Required only if user has a PIN set)
         if user.withdraw_pin:
             if not current_pin:
-                raise serializers.ValidationError({'current_pin': 'Current PIN is required to update your PIN.'})
+                raise serializers.ValidationError({'current_pin': 'PIN saat ini wajib diisi karena Anda sudah mengatur PIN sebelumnya.'})
+            
             if not (len(current_pin) == 6 and current_pin.isdigit()):
-                raise serializers.ValidationError({'current_pin': 'Current PIN must be exactly 6 digits.'})
+                raise serializers.ValidationError({'current_pin': 'PIN saat ini harus 6 digit angka.'})
+            
             if not user.check_withdraw_pin(current_pin):
-                raise serializers.ValidationError({'current_pin': 'Current PIN is incorrect.'})
+                raise serializers.ValidationError({'current_pin': 'PIN saat ini salah.'})
+        
+        # If user hasn't set a PIN, current_pin is ignored (can be empty)
 
         attrs['user'] = user
         attrs['new_pin'] = new_pin
@@ -285,6 +305,42 @@ class WithdrawPinSerializer(serializers.Serializer):
         user = self.validated_data['user']
         new_pin = self.validated_data['new_pin']
         user.set_withdraw_pin(new_pin)
+        return user
+
+
+class AdminWithdrawPinSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField(required=False)
+    phone = serializers.CharField(required=False, allow_blank=True)
+    new_pin = serializers.CharField(write_only=True)
+    
+    def validate(self, attrs):
+        user_id = attrs.get('user_id')
+        phone = (attrs.get('phone') or '').strip()
+        new_pin = (attrs.get('new_pin') or '').strip()
+        
+        if not user_id and not phone:
+            raise serializers.ValidationError({'detail': 'Harus mengisi user_id atau phone.'})
+        
+        target = None
+        if user_id:
+            target = User.objects.filter(id=user_id).first()
+        elif phone:
+            target = User.objects.filter(phone=phone).first()
+        
+        if not target:
+            raise serializers.ValidationError({'detail': 'User tidak ditemukan.'})
+        
+        if not (len(new_pin) == 6 and new_pin.isdigit()):
+            raise serializers.ValidationError({'new_pin': 'PIN harus 6 digit angka.'})
+        
+        attrs['target_user'] = target
+        attrs['clean_pin'] = new_pin
+        return attrs
+    
+    def save(self, **kwargs):
+        user = self.validated_data['target_user']
+        pin = self.validated_data['clean_pin']
+        user.set_withdraw_pin(pin)
         return user
 
 class DownlineStatsLevelSerializer(serializers.Serializer):

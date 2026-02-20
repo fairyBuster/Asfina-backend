@@ -7,16 +7,16 @@ from .forms import VoucherAdminForm
 class VoucherAdmin(admin.ModelAdmin):
     form = VoucherAdminForm
     list_display = (
-        'code', 'type', 'amount', 'min_amount', 'max_amount', 'balance_type',
-        'usage_limit', 'used_count', 'is_active', 'expires_at', 'created_at'
+        'code', 'type', 'claim_mode', 'amount', 'min_amount', 'max_amount', 'balance_type',
+        'usage_limit', 'used_count', 'is_active', 'is_daily_claim', 'start_at', 'expires_at', 'created_at'
     )
     search_fields = ('code',)
-    list_filter = ('is_active', 'balance_type', 'type')
+    list_filter = ('is_active', 'is_daily_claim', 'balance_type', 'type', 'claim_mode')
     readonly_fields = ('created_at', 'updated_at')
 
     fieldsets = (
         (None, {
-            'fields': ('code', 'is_active', 'expires_at', 'balance_type', 'usage_limit')
+            'fields': ('code', 'claim_mode', 'is_active', 'is_daily_claim', 'start_at', 'expires_at', 'balance_type', 'usage_limit')
         }),
         ('Reward Type', {
             'fields': ('type',)

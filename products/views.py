@@ -11,7 +11,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExampl
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_view, OpenApiParameter, extend_schema
 from .models import Product, Transaction, Investment
-from .serializers import ProductListSerializer, ProductDetailSerializer, TransactionSerializer, InvestmentSerializer, ProductPurchaseSerializer, ClaimProfitSerializer, ClaimCashbackSerializer
+from .serializers import ProductListSerializer, ProductDetailSerializer, TransactionSerializer, InvestmentSerializer, ProductPurchaseSerializer, ClaimProfitSerializer, ClaimCashbackSerializer, ClaimPrincipalSerializer
 from django.core.files.storage import default_storage
 from django.conf import settings
 from rest_framework.permissions import AllowAny
@@ -796,6 +796,72 @@ class InvestmentViewSet(viewsets.ModelViewSet):
             'days_passed': investment.days_passed,
             'next_claim_time': investment.next_claim_time,
             'investment_status': investment.status
+        })
+    
+    @extend_schema(
+        tags=[USER_TAG],
+        request=ClaimPrincipalSerializer,
+        responses={
+            200: OpenApiResponse(
+                description='Principal returned successfully',
+                examples=[
+                    OpenApiExample(
+                        'Success Response',
+                        value={
+                            'message': 'Modal berhasil dikembalikan',
+                            'returned_amount': '10000.00',
+                            'wallet_type': 'BALANCE',
+                            'transaction_id': 'INVRET-20250217120000-ABC123',
+                            'balance': '110000.00',
+                        }
+                    )
+                ]
+            ),
+            400: OpenApiResponse(
+                description='Cannot return principal (not completed, already returned, not enabled, etc.)'
+            )
+        },
+        description='Manually claim principal return after investment completion'
+    )
+    @action(detail=False, methods=['post'], url_path='claim-principal')
+    def claim_principal(self, request):
+        serializer = ClaimPrincipalSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        investment_id = serializer.validated_data['investment_id']
+        investment = Investment.objects.select_related('product', 'transaction', 'user').get(id=investment_id, user=request.user)
+        
+        investment.update_remaining_days()
+        investment.refresh_from_db()
+        
+        if investment.status not in ['COMPLETED', 'EXPIRED']:
+            return Response({
+                'error': 'Investasi belum selesai'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not getattr(investment.product, 'return_principal_on_completion', False):
+            return Response({
+                'error': 'Produk ini tidak mengaktifkan pengembalian modal'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if investment.principal_returned:
+            return Response({
+                'error': 'Modal sudah pernah dikembalikan'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        result = investment.return_principal_if_eligible()
+        if not result:
+            return Response({
+                'error': 'Tidak dapat mengembalikan modal'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({
+            'message': 'Modal berhasil dikembalikan',
+            'returned_amount': str(result['amount']),
+            'wallet_type': result['wallet_type'],
+            'transaction_id': result['transaction_id'],
+            'balance': str(result['balance']),
+            'investment_status': investment.status,
         })
     
     def _process_profit_rebates(self, claimer, product, profit_amount, original_transaction):

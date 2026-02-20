@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Product, Transaction, Investment
+from accounts.models import GeneralSetting
 from django.core.files.storage import default_storage
 from django.conf import settings
 
@@ -68,12 +69,28 @@ class TransactionSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     upline_phone = serializers.CharField(source='upline_user.phone', read_only=True)
     bank_account_name = serializers.SerializerMethodField()
+    bank_account_number = serializers.SerializerMethodField()
     bank_name = serializers.SerializerMethodField()
+    withdrawal_service_name = serializers.SerializerMethodField()
+    withdrawal_service_duration_hours = serializers.SerializerMethodField()
+    withdrawal_service_fee_percent = serializers.SerializerMethodField()
     
     class Meta:
         model = Transaction
         fields = '__all__'
-        read_only_fields = ('created_at', 'trx_id', 'user_phone', 'product_name', 'upline_phone', 'bank_account_name', 'bank_name')
+        read_only_fields = (
+            'created_at',
+            'trx_id',
+            'user_phone',
+            'product_name',
+            'upline_phone',
+            'bank_account_name',
+            'bank_account_number',
+            'bank_name',
+            'withdrawal_service_name',
+            'withdrawal_service_duration_hours',
+            'withdrawal_service_fee_percent',
+        )
 
     def validate(self, data):
         # Validate amount is positive
@@ -116,6 +133,15 @@ class TransactionSerializer(serializers.ModelSerializer):
             pass
         return None
 
+    def get_bank_account_number(self, obj):
+        try:
+            wd = self._get_withdrawal(obj)
+            if wd and hasattr(wd, 'bank_account') and wd.bank_account:
+                return wd.bank_account.account_number
+        except Exception:
+            pass
+        return None
+
     def get_bank_name(self, obj):
         try:
             wd_manager = getattr(obj, 'related_withdrawal', None)
@@ -131,6 +157,48 @@ class TransactionSerializer(serializers.ModelSerializer):
 
             if wd and hasattr(wd, 'bank_account') and wd.bank_account and wd.bank_account.bank:
                 return wd.bank_account.bank.name
+        except Exception:
+            pass
+        return None
+
+    def _get_withdrawal(self, obj):
+        wd_manager = getattr(obj, 'related_withdrawal', None)
+        wd = None
+        if wd_manager:
+            if hasattr(wd_manager, 'all'):
+                wds = wd_manager.all()
+                if wds:
+                    wd = wds[0]
+            else:
+                wd = wd_manager
+        return wd
+
+    def get_withdrawal_service_name(self, obj):
+        try:
+            wd = self._get_withdrawal(obj)
+            service = getattr(wd, 'withdrawal_service', None) if wd else None
+            if service:
+                return service.name
+        except Exception:
+            pass
+        return None
+
+    def get_withdrawal_service_duration_hours(self, obj):
+        try:
+            wd = self._get_withdrawal(obj)
+            service = getattr(wd, 'withdrawal_service', None) if wd else None
+            if service:
+                return service.duration_hours
+        except Exception:
+            pass
+        return None
+
+    def get_withdrawal_service_fee_percent(self, obj):
+        try:
+            wd = self._get_withdrawal(obj)
+            service = getattr(wd, 'withdrawal_service', None) if wd else None
+            if service:
+                return str(service.fee_percent)
         except Exception:
             pass
         return None
@@ -186,6 +254,7 @@ class InvestmentSerializer(serializers.ModelSerializer):
 class ProductPurchaseSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1, default=1)
+    withdraw_pin = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
     def validate_product_id(self, value):
         try:
@@ -200,24 +269,20 @@ class ProductPurchaseSerializer(serializers.Serializer):
         return value
     
     def validate(self, data):
-        # Additional validation for product purchase
         product = Product.objects.get(id=data['product_id'])
         quantity = data['quantity']
         user = self.context['request'].user
         
-        # Check stock if enabled
         if product.stock_enabled and product.stock < quantity:
             raise serializers.ValidationError({
                 'quantity': f'Stok tidak mencukupi. Tersedia: {product.stock}'
             })
         
-        # Check purchase limits per quantity
         if quantity > product.purchase_limit:
             raise serializers.ValidationError({
                 'quantity': f'Kuantitas melebihi batas pembelian {product.purchase_limit}'
             })
         
-        # Check if user has already reached the purchase limit for this product
         from .models import Investment
         existing_investments = Investment.objects.filter(
             user=user, 
@@ -229,10 +294,47 @@ class ProductPurchaseSerializer(serializers.Serializer):
                 'product_id': f'Batas pembelian tercapai. Anda hanya bisa membeli produk ini {product.purchase_limit} kali. Saat ini sudah {existing_investments} kali.'
             })
         
+        settings_obj = GeneralSetting.objects.order_by('-updated_at').first()
+        withdraw_pin_raw = (data.get('withdraw_pin') or '').strip()
+        if settings_obj and settings_obj.require_withdraw_pin_on_purchase:
+            if not withdraw_pin_raw:
+                raise serializers.ValidationError({
+                    'withdraw_pin': 'Withdraw PIN wajib diisi untuk melakukan pembelian.'
+                })
+        if withdraw_pin_raw:
+            if not (len(withdraw_pin_raw) == 6 and withdraw_pin_raw.isdigit()):
+                raise serializers.ValidationError({
+                    'withdraw_pin': 'Withdraw PIN harus 6 digit angka.'
+                })
+            if not user.withdraw_pin:
+                raise serializers.ValidationError({
+                    'withdraw_pin': 'Withdraw PIN belum diset di akun Anda.'
+                })
+            if not user.check_withdraw_pin(withdraw_pin_raw):
+                raise serializers.ValidationError({
+                    'withdraw_pin': 'Withdraw PIN salah.'
+                })
+        
         return data
 
 
 class ClaimProfitSerializer(serializers.Serializer):
+    investment_id = serializers.IntegerField()
+    
+    def validate_investment_id(self, value):
+        request = self.context.get('request')
+        if not request or not request.user:
+            raise serializers.ValidationError("Autentikasi diperlukan")
+        
+        try:
+            Investment.objects.get(id=value, user=request.user)
+        except Investment.DoesNotExist:
+            raise serializers.ValidationError("Investasi tidak ditemukan atau bukan milik user")
+        
+        return value
+
+
+class ClaimPrincipalSerializer(serializers.Serializer):
     investment_id = serializers.IntegerField()
     
     def validate_investment_id(self, value):

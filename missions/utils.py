@@ -38,7 +38,16 @@ def compute_mission_progress(mission, user: User) -> int:
         downline_ids = _get_downlines(user, levels or [1])
         if not downline_ids:
             return 0
-        return Investment.objects.filter(user_id__in=downline_ids, status='ACTIVE').values('user_id').distinct().count()
+        return (
+            Investment.objects.filter(
+                user_id__in=downline_ids,
+                status='ACTIVE',
+                product__qualify_as_active_investment=True,
+            )
+            .values('user_id')
+            .distinct()
+            .count()
+        )
 
     if mtype == 'purchase':
         downline_ids = _get_downlines(user, levels or [1])

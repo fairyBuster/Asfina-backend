@@ -106,6 +106,8 @@ class GeneralSetting(models.Model):
         blank=True,
         help_text='API Key untuk checknumber.ai (pemeriksa nomor WhatsApp)'
     )
+    require_withdraw_pin_on_register = models.BooleanField(default=False)
+    require_withdraw_pin_on_purchase = models.BooleanField(default=False)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

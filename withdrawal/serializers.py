@@ -1,7 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 from django.db.models import Sum
-from .models import Withdrawal, WithdrawalSettings
+from .models import Withdrawal, WithdrawalSettings, WithdrawalService
 from banks.models import UserBank, Bank
 from products.models import Transaction
 import uuid
@@ -15,6 +15,20 @@ class WithdrawalSettingsSerializer(serializers.ModelSerializer):
         ]
 
 
+class WithdrawalServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WithdrawalService
+        fields = [
+            'id',
+            'name',
+            'description',
+            'duration_hours',
+            'fee_percent',
+            'is_active',
+            'sort_order',
+        ]
+
+
 class WithdrawalSerializer(serializers.ModelSerializer):
     bank_account_id = serializers.IntegerField(write_only=True, required=False)
     pin = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -22,20 +36,53 @@ class WithdrawalSerializer(serializers.ModelSerializer):
     bank_account_name = serializers.CharField(source='bank_account.account_name', read_only=True)
     bank_name = serializers.CharField(source='bank_account.bank.name', read_only=True)
     bank_code = serializers.CharField(source='bank_account.bank.code', read_only=True)
+    service_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    service_name = serializers.CharField(source='withdrawal_service.name', read_only=True)
+    service_duration_hours = serializers.IntegerField(source='withdrawal_service.duration_hours', read_only=True)
+    service_fee_percent = serializers.DecimalField(source='withdrawal_service.fee_percent', max_digits=5, decimal_places=2, read_only=True)
 
     class Meta:
         model = Withdrawal
         fields = [
-            'id', 'amount', 'fee', 'net_amount', 'status', 'bank_account', 'bank_account_id', 'created_at', 'pin',
-            'bank_account_number', 'bank_account_name', 'bank_name', 'bank_code'
+            'id',
+            'amount',
+            'fee',
+            'net_amount',
+            'status',
+            'bank_account',
+            'bank_account_id',
+            'created_at',
+            'pin',
+            'bank_account_number',
+            'bank_account_name',
+            'bank_name',
+            'bank_code',
+            'service_id',
+            'service_name',
+            'service_duration_hours',
+            'service_fee_percent',
         ]
-        read_only_fields = ['fee', 'net_amount', 'status', 'bank_account', 'created_at', 'bank_account_number', 'bank_account_name', 'bank_name', 'bank_code']
+        read_only_fields = [
+            'fee',
+            'net_amount',
+            'status',
+            'bank_account',
+            'created_at',
+            'bank_account_number',
+            'bank_account_name',
+            'bank_name',
+            'bank_code',
+            'service_name',
+            'service_duration_hours',
+            'service_fee_percent',
+        ]
 
     def validate(self, attrs):
         user = self.context['request'].user
         amount = attrs.get('amount')
         bank_account_id = self.initial_data.get('bank_account_id')
         provided_pin = (self.initial_data.get('pin') or '').strip()
+        service_id = self.initial_data.get('service_id')
 
         # Settings checks
         settings_obj = WithdrawalSettings.objects.order_by('-updated_at').first()
@@ -77,16 +124,23 @@ class WithdrawalSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('Anda harus memiliki setidaknya satu produk aktif untuk melakukan penarikan.')
 
         # Product requirement (if specified)
-        # Minimal: ensure user has at least minimum_product_quantity investments
-        # If required_product is set, check specific product. Otherwise check any product.
+        # Minimal: ensure user has at least minimum_product_quantity ACTIVE investments
+        # If required_product is set, check specific product. Otherwise check any active product.
         if settings_obj.minimum_product_quantity > 0:
             from products.models import Investment
             if settings_obj.required_product:
-                qty = Investment.objects.filter(user=user, product=settings_obj.required_product).aggregate(Sum('quantity'))['quantity__sum'] or 0
+                qty = Investment.objects.filter(
+                    user=user,
+                    product=settings_obj.required_product,
+                    status='ACTIVE'
+                ).aggregate(Sum('quantity'))['quantity__sum'] or 0
                 if qty < settings_obj.minimum_product_quantity:
                     raise serializers.ValidationError(f'Anda harus memiliki minimal {settings_obj.minimum_product_quantity} unit produk {settings_obj.required_product.name} untuk melakukan penarikan.')
             else:
-                qty = Investment.objects.filter(user=user).aggregate(Sum('quantity'))['quantity__sum'] or 0
+                qty = Investment.objects.filter(
+                    user=user,
+                    status='ACTIVE'
+                ).aggregate(Sum('quantity'))['quantity__sum'] or 0
                 if qty < settings_obj.minimum_product_quantity:
                     raise serializers.ValidationError(f'Anda harus memiliki minimal {settings_obj.minimum_product_quantity} produk aktif untuk melakukan penarikan.')
 
@@ -105,20 +159,39 @@ class WithdrawalSerializer(serializers.ModelSerializer):
             if not user.check_withdraw_pin(provided_pin):
                 raise serializers.ValidationError('Invalid PIN.')
 
+        service = None
+        active_services = WithdrawalService.objects.filter(is_active=True)
+        if active_services.exists():
+            if not service_id:
+                raise serializers.ValidationError('Jasa withdraw wajib dipilih.')
+            try:
+                service = active_services.get(id=service_id)
+            except WithdrawalService.DoesNotExist:
+                raise serializers.ValidationError('Jasa withdraw tidak valid.')
+        elif service_id:
+            try:
+                service = WithdrawalService.objects.get(id=service_id, is_active=True)
+            except WithdrawalService.DoesNotExist:
+                raise serializers.ValidationError('Jasa withdraw tidak valid.')
+
         attrs['_settings_obj'] = settings_obj
         attrs['_user_bank'] = user_bank
+        attrs['_service'] = service
         return attrs
 
     def create(self, validated_data):
         user = self.context['request'].user
         amount = validated_data['amount']
         user_bank = validated_data.get('_user_bank')
+        service = validated_data.get('_service')
 
-        # Compute fee from bank withdrawal_fee as percentage of amount
-        from decimal import Decimal
         fee = Decimal(0)
+        rate = Decimal(0)
         if user_bank:
-            rate = (user_bank.bank.withdrawal_fee or Decimal(0))
+            rate += user_bank.bank.withdrawal_fee or Decimal(0)
+        if service:
+            rate += service.fee_percent or Decimal(0)
+        if rate:
             fee = (amount * rate / Decimal('100')).quantize(Decimal('0.01'))
 
         net_amount = amount - fee
@@ -141,6 +214,7 @@ class WithdrawalSerializer(serializers.ModelSerializer):
         withdrawal = Withdrawal.objects.create(
             user=user,
             bank_account=user_bank,
+            withdrawal_service=service,
             amount=amount,
             fee=fee,
             net_amount=net_amount,
