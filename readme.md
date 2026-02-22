@@ -61,7 +61,9 @@ sudo chmod 640 /etc/ssl/cloudflare/*.pem
 
 
 ⚠️ Ini penting supaya service caddy bisa membaca cert.
-
+sudo mkdir -p /var/log/caddy
+sudo chown -R caddy:caddy /var/log/caddy
+sudo chmod 750 /var/log/caddy
 5️⃣ Konfigurasi Caddyfile
 sudo nano /etc/caddy/Caddyfile
 

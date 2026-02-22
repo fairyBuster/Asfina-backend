@@ -178,12 +178,12 @@ USE_TZ = True
 
 # Use the standard '/static/' URL so Django admin looks under /static/admin/
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.environ.get('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
 STATICFILES_DIRS = []
 
 # Media files (Uploads)
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 # Ensure uploaded files/directories have secure, readable permissions for web server
 FILE_UPLOAD_PERMISSIONS = 0o640
