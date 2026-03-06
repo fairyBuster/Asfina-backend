@@ -71,7 +71,7 @@ class AttendanceLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         # Users can only see their own logs; admin can see all
-        qs = AttendanceLog.objects.all()
+        qs = AttendanceLog.objects.select_related('user').all()
         if not self.request.user.is_staff:
             qs = qs.filter(user=self.request.user)
         return qs

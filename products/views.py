@@ -129,21 +129,45 @@ class ProductViewSet(viewsets.ModelViewSet):
         product_id = serializer.validated_data['product_id']
         quantity = serializer.validated_data['quantity']
         
-        product = Product.objects.get(id=product_id)
-        user = request.user
-        total_amount = product.price * quantity
-        
-        # Check user balance based on product's balance source
-        balance_field = 'balance' if product.balance_source == 'balance' else 'balance_deposit'
-        current_balance = getattr(user, balance_field)
-        
-        if current_balance < total_amount:
-            return Response({
-                'error': f'Insufficient {balance_field.replace("_", " ").title()}. Required: Rp {total_amount:,.2f}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
         # Use database transaction for atomicity
         with transaction.atomic():
+            # Lock the user and product rows to prevent race conditions
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            
+            # Select for update to lock the user row (for balance check)
+            user = User.objects.select_for_update().get(id=request.user.id)
+            # Select for update to lock the product row (for stock management)
+            product = Product.objects.select_for_update().get(id=product_id)
+            
+            total_amount = product.price * quantity
+            
+            # Check user balance based on product's balance source
+            balance_field = 'balance' if product.balance_source == 'balance' else 'balance_deposit'
+            current_balance = getattr(user, balance_field)
+            
+            if current_balance < total_amount:
+                return Response({
+                    'error': f'Insufficient {balance_field.replace("_", " ").title()}. Required: Rp {total_amount:,.2f}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Re-validate purchase limit inside the lock
+            existing_investments = Investment.objects.filter(
+                user=user, 
+                product=product
+            ).count()
+            
+            if existing_investments >= product.purchase_limit:
+                 return Response({
+                    'error': f'Batas pembelian tercapai. Anda hanya bisa membeli produk ini {product.purchase_limit} kali. Saat ini sudah {existing_investments} kali.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Re-validate stock inside lock
+            if product.stock_enabled and product.stock < quantity:
+                return Response({
+                    'error': f'Stok tidak mencukupi. Tersedia: {product.stock}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
             # Deduct balance
             setattr(user, balance_field, current_balance - total_amount)
             user.save()
@@ -438,7 +462,10 @@ class TransactionViewSet(viewsets.ModelViewSet):
             qs = Transaction.objects.all()
         else:
             qs = Transaction.objects.filter(user=user)
-        return qs.select_related('user', 'product', 'upline_user').prefetch_related('related_withdrawal__bank_account__bank')
+        return qs.select_related('user', 'product', 'upline_user').prefetch_related(
+            'related_withdrawal__bank_account__bank',
+            'related_withdrawal__withdrawal_service'
+        )
     
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
@@ -543,9 +570,8 @@ class InvestmentViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.is_staff:
-            return Investment.objects.all()
-        return Investment.objects.filter(user=user)
+        queryset = Investment.objects.all() if user.is_staff else Investment.objects.filter(user=user)
+        return queryset.select_related('user', 'product', 'transaction')
     
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy', 'create']:
@@ -579,10 +605,13 @@ class InvestmentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(product_id=product_id)
         
         # Update remaining days for all active investments
-        for investment in queryset.filter(status='ACTIVE'):
-            investment.update_remaining_days()
+        # Optimize by iterating over the prefetched queryset to avoid extra DB query
+        investments = list(queryset)
+        for investment in investments:
+            if investment.status == 'ACTIVE':
+                investment.update_remaining_days()
         
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = self.get_serializer(investments, many=True)
         return Response(serializer.data)
 
     @extend_schema(
@@ -640,7 +669,7 @@ class InvestmentViewSet(viewsets.ModelViewSet):
         if product_id:
             queryset = queryset.filter(product_id=product_id)
 
-        queryset = queryset.select_related('user', 'product', 'upline_user').prefetch_related('related_withdrawal__bank_account__bank').order_by('-created_at')
+        queryset = queryset.select_related('user', 'product', 'upline_user').prefetch_related('related_withdrawal__bank_account__bank', 'related_withdrawal__withdrawal_service').order_by('-created_at')
         try:
             limit = int(request.query_params.get('limit', '100'))
         except Exception:

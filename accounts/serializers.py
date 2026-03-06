@@ -205,34 +205,52 @@ class AccountStatsSerializer(serializers.ModelSerializer):
 
     def get_total_profit_commission(self, obj):
         # Sum of completed TRANSACTION type 'PROFIT' linked to user
+        if hasattr(obj, 'total_profit_commission_val'):
+            return obj.total_profit_commission_val
         return Transaction.objects.filter(user=obj, type='PROFIT', status='COMPLETED').aggregate(total=Sum('amount'))['total'] or 0
 
     def get_total_purchase_commission(self, obj):
         # Sum of completed TRANSACTION type 'COMMISSIONS' linked to user
+        if hasattr(obj, 'total_purchase_commission_val'):
+            return obj.total_purchase_commission_val
         return Transaction.objects.filter(user=obj, type='COMMISSIONS', status='COMPLETED').aggregate(total=Sum('amount'))['total'] or 0
 
     def get_total_earned_commission(self, obj):
         return self.get_total_profit_commission(obj) + self.get_total_purchase_commission(obj)
 
     def get_commission_count(self, obj):
+        if hasattr(obj, 'commission_count_val'):
+            return obj.commission_count_val
         return Transaction.objects.filter(user=obj, type__in=['COMMISSIONS', 'PROFIT'], status='COMPLETED').count()
 
     def get_total_investments(self, obj):
+        if hasattr(obj, 'total_investments_val'):
+            return obj.total_investments_val
         return Investment.objects.filter(user=obj).count()
 
     def get_total_investment_amount(self, obj):
+        if hasattr(obj, 'total_investment_amount_val'):
+            return obj.total_investment_amount_val
         return Investment.objects.filter(user=obj).aggregate(total=Sum('amount'))['total'] or 0
 
     def get_active_investments(self, obj):
+        if hasattr(obj, 'active_investments_val'):
+            return obj.active_investments_val
         return Investment.objects.filter(user=obj, status='ACTIVE').count()
 
     def get_total_deposits(self, obj):
+        if hasattr(obj, 'total_deposits_val'):
+            return obj.total_deposits_val
         return Deposit.objects.filter(user=obj).count()
 
     def get_total_deposit_amount(self, obj):
+        if hasattr(obj, 'total_deposit_amount_val'):
+            return obj.total_deposit_amount_val
         return Deposit.objects.filter(user=obj, status='COMPLETED').aggregate(total=Sum('amount'))['total'] or 0
 
     def get_completed_deposits(self, obj):
+        if hasattr(obj, 'completed_deposits_val'):
+            return obj.completed_deposits_val
         return Deposit.objects.filter(user=obj, status='COMPLETED').count()
 
     def get_is_active(self, obj):

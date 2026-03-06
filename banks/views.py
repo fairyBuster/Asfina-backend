@@ -32,7 +32,7 @@ class UserBankView(APIView):
         responses={200: OpenApiResponse(response=UserBankListSerializer(many=True))},
     )
     def get(self, request):
-        user_banks = UserBank.objects.filter(user=request.user).order_by('-is_default', 'created_at')
+        user_banks = UserBank.objects.filter(user=request.user).select_related('bank').order_by('-is_default', 'created_at')
         ser = UserBankListSerializer(user_banks, many=True)
         return Response(ser.data)
 

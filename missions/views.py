@@ -16,7 +16,7 @@ from .serializers import (
 )
 from .utils import compute_mission_progress
 from products.models import Transaction
-from accounts.models import RankLevel, GeneralSetting
+from accounts.models import RankLevel, GeneralSetting, User
 from products.models import Investment
 from deposits.models import Deposit
 from django.db.models import Sum
@@ -57,15 +57,13 @@ class MissionListView(APIView):
                     downline_ids = []
                     current_level = [request.user]
                     for lvl in range(1, max(lvls or [0]) + 1):
-                        next_level = []
-                        for u in current_level:
-                            ds = list(u.referrals.all())
-                            next_level.extend(ds)
-                            if lvl in lvls:
-                                downline_ids.extend([d.id for d in ds])
-                        current_level = next_level
                         if not current_level:
                             break
+                        # Bulk fetch next level users to avoid N+1
+                        next_level = list(User.objects.filter(referral_by__in=current_level))
+                        if lvl in lvls:
+                            downline_ids.extend([d.id for d in next_level])
+                        current_level = next_level
                     agg2 = Deposit.objects.filter(user_id__in=downline_ids, status='COMPLETED').aggregate(total=Sum('amount'))
                     dec_total = agg2.get('total') or 0
                     for mid in ids:

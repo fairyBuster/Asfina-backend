@@ -35,8 +35,9 @@ class ProductListSerializer(serializers.ModelSerializer):
                 url = settings.MEDIA_URL + 'products/default.png'
         except Exception:
             url = settings.MEDIA_URL + 'products/default.png'
-        if request:
-            return request.build_absolute_uri(url)
+        # Return relative URL instead of absolute URI to hide backend domain
+        # if request:
+        #     return request.build_absolute_uri(url)
         return url
 
     def get_purchase_commission_rates(self, obj):

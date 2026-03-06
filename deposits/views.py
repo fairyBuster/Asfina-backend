@@ -15,6 +15,7 @@ from products.serializers import TransactionSerializer
 from .models import GatewaySettings, Deposit
 from withdrawal.integrations.jayapay import sign_params_legacy
 from .integrations.klikpay import build_params as klikpay_build_params, sign_params as klikpay_sign_params, send_prepaid_request as klikpay_send_prepaid
+from .utils import verify_jayapay_signature
 from django.db.models import Q
 from zoneinfo import ZoneInfo
 from datetime import datetime, time, timedelta
@@ -209,6 +210,35 @@ class JayapayDepositCallbackView(APIView):
             return Response('SUCCESS')
 
         if code == '00' and msg == 'SUCCESS':
+            # Verify callback signature using Public Key
+            is_valid = False
+            try:
+                public_key = (gs.jayapay_public_key or '').strip() if gs else ''
+                
+                if public_key:
+                    is_valid = verify_jayapay_signature(callback, public_key)
+                else:
+                    # If public key missing, we cannot verify. Fail safe.
+                    # Or check if private key exists (maybe user put it there?)
+                    # But per docs, we need PLATFORM PUBLIC KEY.
+                    is_valid = False
+            except Exception:
+                is_valid = False
+            
+            if not is_valid:
+                # Log spoof attempt or configuration error
+                if trx.status in ('PENDING', 'PROCESSING'):
+                    trx.status = 'FAILED'
+                    trx.description += " [Invalid Callback Signature]"
+                    trx.save(update_fields=['status', 'description'])
+                    try:
+                        dep = Deposit.objects.get(order_num=order_num)
+                        dep.status = 'FAILED'
+                        dep.save(update_fields=['status'])
+                    except Deposit.DoesNotExist:
+                        pass
+                return Response('SUCCESS')
+
             user = trx.user
             wallet_field = 'balance' if trx.wallet_type == 'BALANCE' else 'balance_deposit'
             with db_transaction.atomic():
@@ -446,6 +476,9 @@ class DepositTransactionsListView(APIView):
             queryset = Transaction.objects.all()
         else:
             queryset = Transaction.objects.filter(Q(user=request.user) | Q(upline_user=request.user))
+        
+        # Optimize queries to avoid N+1
+        queryset = queryset.select_related('user', 'product', 'upline_user').prefetch_related('related_withdrawal')
 
         # Hanya transaksi bertipe DEPOSIT
         queryset = queryset.filter(type='DEPOSIT')

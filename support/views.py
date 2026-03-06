@@ -191,7 +191,7 @@ class AdminChatStreamView(APIView):
         def event_stream():
             timeout_seconds = 60
             start = time.time()
-            initial = SupportChatMessage.objects.filter(id__gt=last_id).order_by('id')
+            initial = SupportChatMessage.objects.filter(id__gt=last_id).select_related('thread').order_by('id')
             for m in initial:
                 payload = SupportChatMessageSerializer(m).data
                 payload['user_id'] = m.thread.user_id
@@ -199,7 +199,7 @@ class AdminChatStreamView(APIView):
             last_seen_id = initial.last().id if initial.exists() else last_id
 
             while time.time() - start < timeout_seconds:
-                new_msgs = SupportChatMessage.objects.filter(id__gt=last_seen_id).order_by('id')
+                new_msgs = SupportChatMessage.objects.filter(id__gt=last_seen_id).select_related('thread').order_by('id')
                 if new_msgs.exists():
                     for m in new_msgs:
                         payload = SupportChatMessageSerializer(m).data

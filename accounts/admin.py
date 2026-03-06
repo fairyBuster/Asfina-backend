@@ -55,6 +55,8 @@ class UserAdmin(BaseUserAdmin):
     list_display = ('phone', 'email', 'full_name', 'balance_display', 'balance_deposit_display', 
                    'banned_status_display', 'rank', 'referral_code', 'referral_by_display', 
                    'account_status_display', 'last_login_ip', 'created_at')
+    # Optimization: prefetch related fields to avoid N+1 queries
+    list_select_related = ('referral_by',)
     # Removed list_filter for cleaner admin interface
     search_fields = ('phone',)
     ordering = ('-created_at',)

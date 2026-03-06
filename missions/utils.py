@@ -10,15 +10,16 @@ def _get_downlines(user: User, levels: List[int]) -> Set[int]:
     ids: Set[int] = set()
     current_level = [user]
     for lvl in range(1, max(levels or [0]) + 1):
-        next_level = []
-        for u in current_level:
-            for d in u.referrals.all():
-                next_level.append(d)
-                if lvl in levels:
-                    ids.add(d.id)
-        current_level = next_level
         if not current_level:
             break
+        # Bulk fetch next level users to avoid N+1
+        next_level = list(User.objects.filter(referral_by__in=current_level))
+        
+        if lvl in levels:
+            for d in next_level:
+                ids.add(d.id)
+        
+        current_level = next_level
     return ids
 
 

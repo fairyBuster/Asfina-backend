@@ -447,14 +447,26 @@ class Investment(models.Model):
             return self.calculate_next_claim_time()
     
     def update_remaining_days(self):
+        # Store old values to check for changes
+        old_remaining = self.remaining_days
+        old_claims_remaining = self.claims_remaining
+        old_status = self.status
+
         days_passed = (timezone.now().date() - self.created_at.date()).days
         days_remaining_by_time = max(0, self.duration_days - days_passed)
         claims_remaining = max(0, self.duration_days - self.claims_count)
+        
         self.claims_remaining = claims_remaining
         self.remaining_days = min(days_remaining_by_time, claims_remaining)
+        
         if self.remaining_days <= 0 and self.status == 'ACTIVE':
             self.status = 'COMPLETED'
-        self.save(update_fields=['remaining_days', 'claims_remaining', 'status'])
+            
+        # Only save if values changed to reduce database writes on read operations
+        if (self.remaining_days != old_remaining or 
+            self.claims_remaining != old_claims_remaining or 
+            self.status != old_status):
+            self.save(update_fields=['remaining_days', 'claims_remaining', 'status'])
 
     def return_principal_if_eligible(self):
         if not getattr(self.product, 'return_principal_on_completion', False):

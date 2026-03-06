@@ -69,7 +69,7 @@ Setelah service di atas ada, cukup ingat 4 perintah ini:
 - Restart (habis update code):
   
   ```
-  sudo systemctl restart 
+  sudo systemctl restart ocerbackend
   ocerbackend
   ```
 - Cek status cepat (lihat aktif/nggak dan error singkat):

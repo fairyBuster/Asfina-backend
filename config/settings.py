@@ -83,6 +83,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'config.encoded_path_middleware.EncodedApiPathMiddleware',
     'config.security_middleware.DomainIPSecurityMiddleware',  # Add security middleware
+    # 'config.mobile_restriction_middleware.MobileOnlyMiddleware',  # Mobile restriction middleware
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -134,7 +135,8 @@ DATABASES = {
         'PORT': os.environ.get('DATABASE_PORT', '5432'),
         # Disable server-side cursors to be compatible with poolers (e.g., Neon/PgBouncer transaction pooling)
         'DISABLE_SERVER_SIDE_CURSORS': True,
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
+        # Set CONN_MAX_AGE to 0 for PgBouncer in transaction mode to prevent errors
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '0')),
         'OPTIONS': {
             'sslmode': DATABASE_SSLMODE,
         }
@@ -183,7 +185,9 @@ STATICFILES_DIRS = []
 
 # Media files (Uploads)
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
+# Force MEDIA_ROOT to project directory, ignoring environment variable to prevent /var/www/backendocer path
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 # Ensure uploaded files/directories have secure, readable permissions for web server
 FILE_UPLOAD_PERMISSIONS = 0o640

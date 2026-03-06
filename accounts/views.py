@@ -779,6 +779,22 @@ class DownlineOverviewView(APIView):
                     )
                 }
 
+                # Bulk fetch transaction history to avoid N+1 queries
+                all_history = Transaction.objects.filter(
+                    user=user,
+                    upline_user_id__in=ids,
+                    type__in=['PURCHASE_COMMISSION', 'PROFIT_COMMISSION']
+                ).select_related('product', 'user', 'upline_user').order_by('-created_at')
+                
+                history_map = {}
+                for tx in all_history:
+                    uid = tx.upline_user_id
+                    if uid not in history_map:
+                        history_map[uid] = []
+                    # Limit to 20 latest transactions per downline member
+                    if len(history_map[uid]) < 20:
+                        history_map[uid].append(tx)
+
                 for m in level_members:
                     t = tx_map.get(m.id, {})
                     i = inv_map.get(m.id, {})
@@ -798,11 +814,7 @@ class DownlineOverviewView(APIView):
                     m.total_deposit_amount = d.get('total_deposit_amount', 0) or 0
                     m.completed_deposits = d.get('total_deposits', 0) or 0
 
-                    m.transaction_history = Transaction.objects.filter(
-                        user=user,
-                        upline_user=m,
-                        type__in=['PURCHASE_COMMISSION', 'PROFIT_COMMISSION']
-                    ).select_related('product', 'user').order_by('-created_at')[:20]
+                    m.transaction_history = history_map.get(m.id, [])
 
                 levels_data[level] = {
                     'level': level,
@@ -1016,6 +1028,22 @@ class AdminDownlineOverviewView(APIView):
                     )
                 }
 
+                # Bulk fetch transaction history to avoid N+1 queries
+                all_history = Transaction.objects.filter(
+                    user=target_user,
+                    upline_user_id__in=ids,
+                    type__in=['PURCHASE_COMMISSION', 'PROFIT_COMMISSION']
+                ).select_related('product', 'user', 'upline_user').order_by('-created_at')
+                
+                history_map = {}
+                for tx in all_history:
+                    uid = tx.upline_user_id
+                    if uid not in history_map:
+                        history_map[uid] = []
+                    # Limit to 50 latest transactions per downline member
+                    if len(history_map[uid]) < 50:
+                        history_map[uid].append(tx)
+
                 for m in level_members:
                     t = tx_map.get(m.id, {})
                     i = inv_map.get(m.id, {})
@@ -1035,11 +1063,7 @@ class AdminDownlineOverviewView(APIView):
                     m.total_deposit_amount = d.get('total_deposit_amount', 0) or 0
                     m.completed_deposits = d.get('total_deposits', 0) or 0
 
-                    m.transaction_history = Transaction.objects.filter(
-                        user=target_user,
-                        upline_user=m,
-                        type__in=['PURCHASE_COMMISSION', 'PROFIT_COMMISSION']
-                    ).select_related('product', 'user').order_by('-created_at')[:50]
+                    m.transaction_history = history_map.get(m.id, [])
 
                 levels_data[level] = {
                     'level': level,
