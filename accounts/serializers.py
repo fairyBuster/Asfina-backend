@@ -7,15 +7,28 @@ from products.models import Transaction, Investment
 from deposits.models import Deposit
 from django.core.exceptions import ValidationError
 
+class GeneralSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GeneralSetting
+        fields = '__all__'
+
+
+class PublicGeneralSettingSerializer(serializers.ModelSerializer):
+    """Serializer untuk setting publik yang aman dibuka ke frontend"""
+    class Meta:
+        model = GeneralSetting
+        fields = ('frontend_url',)
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model - used for GET requests"""
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'full_name', 'phone', 'balance', 
-                 'balance_deposit', 'banned_status', 'referral_by', 'referral_code', 
+                 'balance_deposit', 'balance_hold', 'banned_status', 'referral_by', 'referral_code', 
                  'rank', 'is_account_non_expired', 'is_account_non_locked', 
                  'is_credentials_non_expired', 'is_enabled', 'created_at', 'updated_at')
-        read_only_fields = ('balance', 'balance_deposit', 'banned_status', 'referral_code', 
+        read_only_fields = ('balance', 'balance_deposit', 'balance_hold', 'banned_status', 'referral_code', 
                           'rank', 'is_account_non_expired', 'is_account_non_locked', 
                           'is_credentials_non_expired', 'is_enabled', 'created_at', 'updated_at')
 
@@ -110,17 +123,21 @@ class AccountInfoSerializer(serializers.ModelSerializer):
     root_parent_username = serializers.SerializerMethodField()
     root_parent_phone = serializers.SerializerMethodField()
     ip_address = serializers.SerializerMethodField()
+    active_investments_count = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'full_name', 'phone', 'balance', 
-                 'balance_deposit', 'referral_by_username', 'referral_by_phone', 
+                 'balance_deposit', 'balance_hold', 'referral_by_username', 'referral_by_phone', 
                  'root_parent_username', 'root_parent_phone',
-                 'referral_code', 'rank', 'created_at', 'updated_at', 'ip_address')
+                 'referral_code', 'rank', 'created_at', 'updated_at', 'ip_address', 'active_investments_count')
         read_only_fields = ('id', 'username', 'email', 'full_name', 'phone', 'balance', 
-                           'balance_deposit', 'referral_by_username', 'referral_by_phone', 
+                           'balance_deposit', 'balance_hold', 'referral_by_username', 'referral_by_phone', 
                            'root_parent_username', 'root_parent_phone',
-                           'referral_code', 'rank', 'created_at', 'updated_at')
+                           'referral_code', 'rank', 'created_at', 'updated_at', 'active_investments_count')
+
+    def get_active_investments_count(self, obj):
+        return Investment.objects.filter(user=obj, status='ACTIVE').count()
 
     def get_ip_address(self, obj):
         request = self.context.get('request')
@@ -466,6 +483,7 @@ class DownlineLevelSerializer(serializers.Serializer):
     """Serializer for downline level summary with investment and deposit totals"""
     level = serializers.IntegerField()
     member_count = serializers.IntegerField()
+    active_member_count = serializers.IntegerField()
     total_profit_commission = serializers.DecimalField(max_digits=15, decimal_places=2)
     total_purchase_commission = serializers.DecimalField(max_digits=15, decimal_places=2)
     total_earned_commission = serializers.DecimalField(max_digits=15, decimal_places=2)

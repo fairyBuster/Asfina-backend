@@ -168,6 +168,7 @@ class ClaimMissionView(APIView):
             use_missions = True if not settings_obj else bool(settings_obj.rank_use_missions)
             use_downlines_total = False if not settings_obj else bool(settings_obj.rank_use_downlines_total)
             use_downlines_active = False if not settings_obj else bool(settings_obj.rank_use_downlines_active)
+            use_deposit_self_total = False if not settings_obj else bool(settings_obj.rank_use_deposit_self_total)
 
             # Hitung kandidat progres per basis yang dipilih, lalu ambil maksimum (OR)
             progress_candidates = []
@@ -179,28 +180,35 @@ class ClaimMissionView(APIView):
                     .distinct()
                     .count()
                 )
-                if use_downlines_total or use_downlines_active:
-                    current_level_users = [user]
-                    total_downlines = 0
-                    active_downlines = 0
-                    for lvl in range(1, max(1, int(levels_upto)) + 1):
-                        next_level = []
-                        for u in current_level_users:
-                            ds = list(u.referrals.all())
-                            next_level.extend(ds)
-                            total_downlines += len(ds)
-                            for d in ds:
-                                if Investment.objects.filter(
-                                    user=d,
-                                    status='ACTIVE',
-                                    product__qualify_as_active_investment=True,
-                                ).exists():
-                                    active_downlines += 1
-                        current_level_users = next_level
-                if use_downlines_total:
-                    progress_candidates.append(total_downlines)
-                if use_downlines_active:
-                    progress_candidates.append(active_downlines)
+            if use_downlines_total or use_downlines_active:
+                current_level_users = [user]
+                total_downlines = 0
+                active_downlines = 0
+                for lvl in range(1, max(1, int(levels_upto)) + 1):
+                    next_level = []
+                    for u in current_level_users:
+                        ds = list(u.referrals.all())
+                        next_level.extend(ds)
+                        total_downlines += len(ds)
+                        for d in ds:
+                            if Investment.objects.filter(
+                                user=d,
+                                status='ACTIVE',
+                                product__qualify_as_active_investment=True,
+                            ).exists():
+                                active_downlines += 1
+                    current_level_users = next_level
+            if use_downlines_total:
+                progress_candidates.append(total_downlines)
+            if use_downlines_active:
+                progress_candidates.append(active_downlines)
+            if use_deposit_self_total:
+                try:
+                    agg = Deposit.objects.filter(user=user, status='COMPLETED').aggregate(total=Sum('amount'))
+                    deposit_total = agg.get('total') or 0
+                except Exception:
+                    deposit_total = 0
+                progress_candidates.append(deposit_total)
 
             progress_count = max(progress_candidates) if progress_candidates else 0
 

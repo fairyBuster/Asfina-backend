@@ -113,6 +113,10 @@ class ProductAdmin(admin.ModelAdmin):
             'description': 'Jika ON: upline wajib punya produk ini (investment ACTIVE) untuk menerima rebate purchase/profit. '
                            'Jika Qualify as active investment dimatikan, pembelian produk ini tidak menghitung user sebagai member aktif (rank/missions).'
         }),
+        ('Purchase Restrictions', {
+            'fields': ('require_min_rank_enabled', 'min_required_rank'),
+            'description': 'Batasi pembelian berdasarkan rank minimum. Contoh: Rank 2 hanya bisa membeli product 2 jika rank ≥ 2.'
+        }),
         ('Rebate Settings (Purchase)', {
             'fields': ('purchase_rebate_level_1', 'purchase_rebate_level_2', 'purchase_rebate_level_3', 'purchase_rebate_level_4', 'purchase_rebate_level_5')
         }),
@@ -305,6 +309,7 @@ class TransactionAdmin(admin.ModelAdmin):
         wallet_map = {
             'BALANCE': 'Balance',
             'BALANCE_DEPOSIT': 'Balance Deposit'
+            , 'BALANCE_HOLD': 'Balance Hold'
         }
         return wallet_map.get(obj.wallet_type, obj.wallet_type)
     wallet_type_display.short_description = 'Wallet Type'

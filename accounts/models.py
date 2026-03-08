@@ -51,6 +51,7 @@ class GeneralSetting(models.Model):
         ('missions', 'Berdasarkan misi selesai'),
         ('downlines_total', 'Jumlah anggota downline'),
         ('downlines_active', 'Jumlah downline aktif'),
+        ('deposit_self_total', 'Jumlah deposit sendiri'),
     ]
     rank_basis = models.CharField(
         max_length=20,
@@ -70,6 +71,10 @@ class GeneralSetting(models.Model):
     rank_use_downlines_active = models.BooleanField(
         default=False,
         help_text='Jika ON, jumlah downline aktif (punya investasi status ACTIVE) digunakan untuk rank'
+    )
+    rank_use_deposit_self_total = models.BooleanField(
+        default=False,
+        help_text='Jika ON, total deposit sendiri (COMPLETED) digunakan untuk rank'
     )
     rank_count_levels_upto = models.PositiveSmallIntegerField(
         default=1,
@@ -109,6 +114,13 @@ class GeneralSetting(models.Model):
     require_withdraw_pin_on_register = models.BooleanField(default=False)
     require_withdraw_pin_on_purchase = models.BooleanField(default=False)
     
+    frontend_url = models.URLField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text='URL domain frontend (contoh: https://my-frontend.com)'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -128,6 +140,7 @@ class User(AbstractUser):
     phone = models.CharField(max_length=15, unique=True)
     balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     balance_deposit = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    balance_hold = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     banned_status = models.BooleanField(default=False)
     referral_by = models.ForeignKey('self', on_delete=models.SET_NULL, blank=True, null=True, related_name='referrals')
     referral_code = models.CharField(max_length=20, unique=True, blank=True, null=True)

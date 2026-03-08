@@ -26,6 +26,7 @@ class Product(models.Model):
     PROFIT_METHOD_CHOICES = [
         ('manual', 'Manual'),
         ('auto', 'Automatic'),
+        ('hold', 'Hold Until Maturity'),
     ]
     
     STATUS_CHOICES = [
@@ -122,6 +123,17 @@ class Product(models.Model):
     custom_field_10_content = models.TextField(null=True, blank=True, help_text='Custom field 10 content')
     specifications = models.TextField(blank=True)
     
+    # Purchase Restrictions
+    require_min_rank_enabled = models.BooleanField(
+        default=False,
+        help_text='Jika ON, user harus memiliki rank minimum untuk membeli produk ini'
+    )
+    min_required_rank = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text='Rank minimum yang dibutuhkan untuk membeli (contoh: 2 untuk Rank 2)'
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -173,6 +185,7 @@ class Transaction(models.Model):
         ('CASHBACK', 'Cashback'),
         ('REJECT', 'Reject'),
         ('RETURN', 'Return'),
+        ('HOLD_RELEASE', 'Hold Release'),
     ]
     
     STATUS_CHOICES = [
@@ -187,6 +200,7 @@ class Transaction(models.Model):
     WALLET_CHOICES = [
         ('BALANCE', 'Balance'),
         ('BALANCE_DEPOSIT', 'Balance Deposit'),
+        ('BALANCE_HOLD', 'Balance Hold'),
     ]
     
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -250,6 +264,7 @@ class Investment(models.Model):
     PROFIT_METHOD_CHOICES = [
         ('manual', 'Manual'),
         ('auto', 'Automatic'),
+        ('hold', 'Hold Until Maturity'),
     ]
     
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

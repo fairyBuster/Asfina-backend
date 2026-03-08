@@ -433,10 +433,13 @@ class UserAdmin(BaseUserAdmin):
 class GeneralSettingAdmin(admin.ModelAdmin):
     list_display = (
         'referral_code_case', 'referral_code_length', 'exclude_similar_chars',
-        'referral_code_pattern', 'auto_login_on_register', 'registration_bonus_enabled', 'registration_bonus_amount', 'registration_bonus_wallet', 'rank_basis', 'rank_count_levels_upto', 'updated_at'
+        'referral_code_pattern', 'auto_login_on_register', 'registration_bonus_enabled', 'registration_bonus_amount', 'registration_bonus_wallet', 'rank_basis', 'rank_count_levels_upto', 'frontend_url', 'updated_at'
     )
     readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
+        ('General', {
+            'fields': ('frontend_url',)
+        }),
         ('Referral Code', {
             'fields': ('referral_code_case', 'referral_code_length', 'exclude_similar_chars', 'referral_code_pattern')
         }),
@@ -452,7 +455,7 @@ class GeneralSettingAdmin(admin.ModelAdmin):
             'description': 'Opsi backup/alternatif: cek nomor WA aktif via checknumber.ai'
         }),
         ('Kebijakan Rank', {
-            'fields': ('rank_basis', 'rank_use_missions', 'rank_use_downlines_total', 'rank_use_downlines_active', 'rank_count_levels_upto'),
+            'fields': ('rank_basis', 'rank_use_missions', 'rank_use_downlines_total', 'rank_use_downlines_active', 'rank_use_deposit_self_total', 'rank_count_levels_upto'),
             'description': (
                 'Pilih basis rank melalui flag boolean. Rank dihitung dengan OR: jika salah satu basis yang dipilih memenuhi ambang RankLevel, maka rank tercapai. '
                 'Level downline menentukan seberapa dalam perhitungan jumlah/aktif downline.'

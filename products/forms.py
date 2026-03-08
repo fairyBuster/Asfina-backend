@@ -1,5 +1,6 @@
 from django import forms
 from .models import Product
+from accounts.models import RankLevel
 
 class ProductAdminForm(forms.ModelForm):
     class Meta:
@@ -20,3 +21,9 @@ class ProductAdminForm(forms.ModelForm):
         # Clarify claim reset hours usage
         if 'claim_reset_hours' in self.fields:
             self.fields['claim_reset_hours'].help_text = 'Interval jam untuk mode Reset after purchase (opsional).'
+        if 'min_required_rank' in self.fields:
+            levels = RankLevel.objects.all().order_by('rank')
+            choices = [('', '— pilih rank —')] + [(str(l.rank), f"{l.rank} - {l.title} (≥ {l.missions_required_total})") for l in levels]
+            self.fields['min_required_rank'].widget = forms.Select(choices=choices)
+            self.fields['min_required_rank'].label = 'Minimum Rank'
+            self.fields['min_required_rank'].help_text = 'Pilih dari RankLevel agar konsisten'

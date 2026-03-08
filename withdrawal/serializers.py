@@ -11,7 +11,7 @@ class WithdrawalSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = WithdrawalSettings
         fields = [
-            'is_active', 'balance_source', 'require_bank_account', 'require_pin', 'minimum_product_quantity', 'required_product'
+            'is_active', 'balance_source', 'require_bank_account', 'require_pin', 'require_active_investment', 'require_withdraw_service', 'minimum_product_quantity', 'required_product'
         ]
 
 
@@ -161,18 +161,26 @@ class WithdrawalSerializer(serializers.ModelSerializer):
 
         service = None
         active_services = WithdrawalService.objects.filter(is_active=True)
-        if active_services.exists():
-            if not service_id:
-                raise serializers.ValidationError('Jasa withdraw wajib dipilih.')
-            try:
-                service = active_services.get(id=service_id)
-            except WithdrawalService.DoesNotExist:
-                raise serializers.ValidationError('Jasa withdraw tidak valid.')
-        elif service_id:
-            try:
-                service = WithdrawalService.objects.get(id=service_id, is_active=True)
-            except WithdrawalService.DoesNotExist:
-                raise serializers.ValidationError('Jasa withdraw tidak valid.')
+        if getattr(settings_obj, 'require_withdraw_service', True):
+            if active_services.exists():
+                if not service_id:
+                    raise serializers.ValidationError('Jasa withdraw wajib dipilih.')
+                try:
+                    service = active_services.get(id=service_id)
+                except WithdrawalService.DoesNotExist:
+                    raise serializers.ValidationError('Jasa withdraw tidak valid.')
+            elif service_id:
+                try:
+                    service = WithdrawalService.objects.get(id=service_id, is_active=True)
+                except WithdrawalService.DoesNotExist:
+                    raise serializers.ValidationError('Jasa withdraw tidak valid.')
+        else:
+            # Service optional; if given, validate it
+            if service_id:
+                try:
+                    service = WithdrawalService.objects.get(id=service_id, is_active=True)
+                except WithdrawalService.DoesNotExist:
+                    raise serializers.ValidationError('Jasa withdraw tidak valid.')
 
         attrs['_settings_obj'] = settings_obj
         attrs['_user_bank'] = user_bank

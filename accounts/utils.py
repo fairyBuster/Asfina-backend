@@ -1,6 +1,8 @@
-from accounts.models import GeneralSetting
+from accounts.models import GeneralSetting, RankLevel
 from missions.models import MissionUserState
 from products.models import Investment
+from deposits.models import Deposit
+from django.db.models import Sum
 import requests
 import logging
 
@@ -196,6 +198,7 @@ def calculate_user_rank_progress(user):
         use_missions = True if not settings_obj else bool(settings_obj.rank_use_missions)
         use_downlines_total = False if not settings_obj else bool(settings_obj.rank_use_downlines_total)
         use_downlines_active = False if not settings_obj else bool(settings_obj.rank_use_downlines_active)
+        use_deposit_self_total = False if not settings_obj else bool(settings_obj.rank_use_deposit_self_total)
 
         progress_candidates = []
         
@@ -239,11 +242,50 @@ def calculate_user_rank_progress(user):
                 progress_candidates.append(total_downlines)
             if use_downlines_active:
                 progress_candidates.append(active_downlines)
+        
+        # 3. Based on Self Deposit Total
+        if use_deposit_self_total:
+            try:
+                agg = Deposit.objects.filter(user=user, status='COMPLETED').aggregate(total=Sum('amount'))
+                deposit_total = agg.get('total') or 0
+            except Exception:
+                deposit_total = 0
+            progress_candidates.append(deposit_total)
 
         return max(progress_candidates) if progress_candidates else 0
         
     except Exception:
         return 0
+
+def update_user_rank(user):
+    """
+    Evaluates and updates the user's rank based on current progress.
+    Returns the new rank (or current rank if no change).
+    """
+    if not user or not user.is_authenticated:
+        return None
+        
+    try:
+        progress_count = calculate_user_rank_progress(user)
+        
+        # Find the highest rank where missions_required_total <= progress_count
+        # We order by rank DESC to get the highest eligible rank
+        target = RankLevel.objects.filter(missions_required_total__lte=progress_count).order_by('-rank').first()
+        
+        if target:
+            current_rank = user.rank if user.rank is not None else 0
+            
+            # Update if target rank is higher than current
+            if target.rank > current_rank:
+                user.rank = target.rank
+                user.save(update_fields=['rank'])
+                logger.info(f"User {user.id} upgraded to Rank {target.rank} (Progress: {progress_count})")
+                return target.rank
+                
+        return user.rank
+    except Exception as e:
+        logger.error(f"Error updating rank for user {user.id}: {e}")
+        return user.rank
 
 def _get_verifynow_token(customer_id, api_key):
     """

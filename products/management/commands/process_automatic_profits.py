@@ -31,10 +31,10 @@ class Command(BaseCommand):
         if dry_run and not quiet:
             self.stdout.write(self.style.WARNING('🔍 DRY RUN MODE - No actual processing will occur'))
         
-        # Get all active investments with automatic profit method that can claim today
+        # Get all active investments with automatic or hold profit method that can claim today
         eligible_investments = Investment.objects.filter(
             status='ACTIVE',
-            product__profit_method='auto',
+            product__profit_method__in=['auto', 'hold'],
             remaining_days__gt=0
         )
         
@@ -88,12 +88,19 @@ class Command(BaseCommand):
 
                     user = investment.user
                     
-                    # Interest/Income always goes to main balance (BALANCE wallet)
-                    current_balance = user.balance
-                    
-                    # Update user balance
-                    user.balance = current_balance + daily_profit
-                    user.save()
+                    # Decide wallet based on profit method
+                    if investment.product.profit_method == 'hold':
+                        current_balance = user.balance_hold
+                        user.balance_hold = current_balance + daily_profit
+                        user.save(update_fields=['balance_hold'])
+                        wallet_type = 'BALANCE_HOLD'
+                        description = f'Hold profit (accrual) from {investment.product.name} investment'
+                    else:
+                        current_balance = user.balance
+                        user.balance = current_balance + daily_profit
+                        user.save(update_fields=['balance'])
+                        wallet_type = 'BALANCE'
+                        description = f'Automatic profit from {investment.product.name} investment'
                     
                     # Create profit transaction
                     profit_transaction = Transaction.objects.create(
@@ -101,9 +108,9 @@ class Command(BaseCommand):
                         product=investment.product,
                         type='INTEREST',
                         amount=daily_profit,
-                        description=f'Automatic profit from {investment.product.name} investment',
+                        description=description,
                         status='COMPLETED',
-                        wallet_type='BALANCE',
+                        wallet_type=wallet_type,
                         trx_id=f'AUTO-{timezone.localtime(timezone.now(), ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d%H%M%S")}-{uuid.uuid4().hex[:6].upper()}'
                     )
                     
@@ -132,6 +139,58 @@ class Command(BaseCommand):
                     investment.update_remaining_days()
                     
                     investment.save()
+                    
+                    # If HOLD method and investment completed, release held profits and principal
+                    if investment.product.profit_method == 'hold' and investment.status == 'COMPLETED':
+                        release_amount = investment.total_claimed_profit
+                        if release_amount and release_amount > 0:
+                            # Move from balance_hold to balance
+                            user.refresh_from_db(fields=['balance', 'balance_hold'])
+                            if user.balance_hold >= release_amount:
+                                user.balance_hold -= release_amount
+                            else:
+                                release_amount = max(0, user.balance_hold)
+                                user.balance_hold = 0
+                            user.balance += release_amount
+                            user.save(update_fields=['balance', 'balance_hold'])
+                            # Record release transaction
+                            Transaction.objects.create(
+                                user=user,
+                                product=investment.product,
+                                type='HOLD_RELEASE',
+                                amount=release_amount,
+                                description=f'Release held profits at maturity for {investment.product.name}',
+                                status='COMPLETED',
+                                wallet_type='BALANCE',
+                                related_transaction=profit_transaction,
+                                trx_id=f'REL-{timezone.localtime(timezone.now(), ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d%H%M%S")}-{uuid.uuid4().hex[:6].upper()}'
+                            )
+                        # Return principal to user's wallet regardless of product flag
+                        try:
+                            original_trx = investment.transaction
+                            wallet_type = original_trx.wallet_type if original_trx else 'BALANCE'
+                            if wallet_type == 'BALANCE':
+                                user.balance += investment.total_amount
+                                user.save(update_fields=['balance'])
+                            elif wallet_type == 'BALANCE_DEPOSIT':
+                                user.balance_deposit += investment.total_amount
+                                user.save(update_fields=['balance_deposit'])
+                            Transaction.objects.create(
+                                user=user,
+                                product=investment.product,
+                                upline_user=None,
+                                trx_id=f'INVRET-{timezone.now().strftime("%Y%m%d%H%M%S")}-{uuid.uuid4().hex[:6].upper()}',
+                                type='RETURN',
+                                amount=investment.total_amount,
+                                description=f'Principal return at maturity for {investment.product.name}',
+                                status='COMPLETED',
+                                wallet_type=wallet_type,
+                                related_transaction=investment.transaction,
+                            )
+                            investment.principal_returned = True
+                            investment.save(update_fields=['principal_returned'])
+                        except Exception as e:
+                            logger.error(f'Failed to return principal at maturity: {e}')
                     
                     # Create ClaimHistory record
                     from products.models import ClaimHistory

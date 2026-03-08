@@ -215,7 +215,7 @@ class WithdrawalJayapayAdmin(WithdrawalAdmin):
 @admin.register(WithdrawalSettings)
 class WithdrawalSettingsAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'is_active', 'balance_source', 'require_bank_account', 'require_pin', 'require_active_investment', 'minimum_product_quantity', 'required_product', 'updated_at'
+        'id', 'is_active', 'balance_source', 'require_bank_account', 'require_pin', 'require_active_investment', 'require_withdraw_service', 'minimum_product_quantity', 'required_product', 'updated_at'
     )
     list_filter = ('is_active',)
     search_fields = ('required_product__name',)

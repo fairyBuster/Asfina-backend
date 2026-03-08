@@ -37,7 +37,7 @@ ADMIN_TAG = "Admin API"
 from .serializers import (RegisterSerializer, UserSerializer, ChangePasswordByPhoneSerializer, 
                          AccountInfoSerializer, DownlineOverviewSerializer, DownlineMemberSerializer,
                          ProfileUpdateSerializer, DownlineStatsLevelSerializer, DownlineStatsResponseSerializer,
-                         WithdrawPinSerializer, AdminWithdrawPinSerializer)
+                         WithdrawPinSerializer, AdminWithdrawPinSerializer, GeneralSettingSerializer, PublicGeneralSettingSerializer)
 from .balance_serializers import BalanceStatisticsSerializer
 from products.models import Transaction, Investment
 from deposits.models import Deposit
@@ -1449,6 +1449,7 @@ class BalanceStatisticsView(APIView):
             'active_members_level_2': active_members_level_2,
             'active_members_level_3': active_members_level_3,
             'active_members_total_1_3': active_members_total_1_3,
+            'balance_hold': getattr(user, 'balance_hold', 0) or 0,
         }
         
         serializer = BalanceStatisticsSerializer(response_data)
@@ -1881,6 +1882,43 @@ class UserAddressListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         return UserAddress.objects.filter(user=self.request.user)
+
+
+class AdminGeneralSettingView(APIView):
+    """
+    Admin-only endpoint to get General Settings including Frontend URL
+    """
+    permission_classes = (IsAuthenticated, IsAdminUser)
+    
+    @extend_schema(
+        tags=[ADMIN_TAG],
+        description="Get General Settings configuration",
+        responses={200: GeneralSettingSerializer}
+    )
+    def get(self, request):
+        setting = GeneralSetting.objects.order_by('-updated_at').first()
+        if not setting:
+            return Response({})
+        serializer = GeneralSettingSerializer(setting)
+        return Response(serializer.data)
+
+class PublicGeneralSettingView(APIView):
+    """
+    Public endpoint to get basic General Settings configuration
+    """
+    permission_classes = (AllowAny,)
+    
+    @extend_schema(
+        tags=[USER_TAG],
+        description="Get public General Settings (frontend_url only)",
+        responses={200: PublicGeneralSettingSerializer}
+    )
+    def get(self, request):
+        setting = GeneralSetting.objects.order_by('-updated_at').first()
+        if not setting:
+            return Response({})
+        serializer = PublicGeneralSettingSerializer(setting)
+        return Response(serializer.data)
 
 
 class TopDepositorsView(APIView):

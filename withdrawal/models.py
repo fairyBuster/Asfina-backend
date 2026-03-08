@@ -20,6 +20,7 @@ class WithdrawalSettings(models.Model):
     minimum_product_quantity = models.PositiveIntegerField(default=0)
     required_product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
     balance_source = models.CharField(max_length=20, choices=BALANCE_CHOICES, default='balance')
+    require_withdraw_service = models.BooleanField(default=True, help_text="Jika ON, user wajib memilih WithdrawalService aktif; jika OFF, boleh tanpa service")
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

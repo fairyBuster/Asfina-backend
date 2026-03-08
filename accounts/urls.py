@@ -26,6 +26,8 @@ urlpatterns = [
     path('address/<int:pk>/', views.UserAddressDetailView.as_view(), name='user_address_detail'),
     path('admin/downline-overview/', views.AdminDownlineOverviewView.as_view(), name='admin_downline_overview'),
     path('admin/decode-response/', views.AdminDecodeApiResponseView.as_view(), name='admin_decode_api_response'),
+    path('admin/settings/', views.AdminGeneralSettingView.as_view(), name='admin_general_settings'),
+    path('settings/', views.PublicGeneralSettingView.as_view(), name='public_general_settings'),
     path('balance-statistics/today/', views.BalanceStatisticsTodayView.as_view(), name='balance_statistics_today'),
     path('balance-statistics/all-time/', views.BalanceStatisticsAllTimeView.as_view(), name='balance_statistics_all_time'),
 ]

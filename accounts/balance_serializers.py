@@ -12,6 +12,7 @@ class ActiveProductSummarySerializer(serializers.Serializer):
 class BalanceStatisticsSerializer(serializers.Serializer):
     balance = serializers.DecimalField(max_digits=15, decimal_places=2)
     balance_deposit = serializers.DecimalField(max_digits=15, decimal_places=2)
+    balance_hold = serializers.DecimalField(max_digits=15, decimal_places=2)
     total_deposit_completed = serializers.DecimalField(max_digits=15, decimal_places=2)
     total_deposit_count = serializers.IntegerField()
     total_withdraw_completed = serializers.DecimalField(max_digits=15, decimal_places=2)

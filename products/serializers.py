@@ -11,6 +11,8 @@ class ProductListSerializer(serializers.ModelSerializer):
     image = serializers.SerializerMethodField()
     purchase_commission_rates = serializers.SerializerMethodField()
     profit_commission_rates = serializers.SerializerMethodField()
+    min_required_rank = serializers.IntegerField(read_only=True)
+    require_min_rank_enabled = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Product
@@ -18,7 +20,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             'id', 'name', 'description', 'price', 'image', 'status',
             'purchase_limit', 'stock', 'stock_enabled', 'profit_rate', 
             'profit_type', 'profit_random_min', 'profit_random_max', 'duration', 'specifications', 'created_at',
-            'purchase_commission_rates', 'profit_commission_rates'
+            'purchase_commission_rates', 'profit_commission_rates',
+            'require_min_rank_enabled', 'min_required_rank'
         )
         read_only_fields = fields
 
@@ -273,6 +276,16 @@ class ProductPurchaseSerializer(serializers.Serializer):
         product = Product.objects.get(id=data['product_id'])
         quantity = data['quantity']
         user = self.context['request'].user
+        
+        # Rank restriction check
+        if getattr(product, 'require_min_rank_enabled', False):
+            min_rank = getattr(product, 'min_required_rank', None)
+            user_rank = getattr(user, 'rank', None)
+            if min_rank is not None:
+                if user_rank is None or int(user_rank) < int(min_rank):
+                    raise serializers.ValidationError({
+                        'product_id': f'Produk ini hanya bisa dibeli oleh user dengan rank minimal {min_rank}. Rank Anda: {user_rank or "-"}'
+                    })
         
         if product.stock_enabled and product.stock < quantity:
             raise serializers.ValidationError({
