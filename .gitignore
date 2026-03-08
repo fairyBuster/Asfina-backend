@@ -32,6 +32,12 @@ db.sqlite3
 db.sqlite3-journal
 media/
 
+# Logs
+logs/
+*.log
+*.out
+*.err
+
 # Other
 .DS_Store
 run/
