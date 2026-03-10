@@ -819,6 +819,7 @@ class DownlineOverviewView(APIView):
                 levels_data[level] = {
                     'level': level,
                     'member_count': len(level_members),
+                    'active_member_count': sum(1 for m in level_members if getattr(m, 'is_active', False)),
                     'total_profit_commission': sum(m.total_profit_commission for m in level_members),
                     'total_purchase_commission': sum(m.total_purchase_commission for m in level_members),
                     'total_earned_commission': sum(m.total_earned_commission for m in level_members),
@@ -1068,6 +1069,7 @@ class AdminDownlineOverviewView(APIView):
                 levels_data[level] = {
                     'level': level,
                     'member_count': len(level_members),
+                    'active_member_count': sum(1 for m in level_members if getattr(m, 'is_active', False)),
                     'total_profit_commission': sum(m.total_profit_commission for m in level_members),
                     'total_purchase_commission': sum(m.total_purchase_commission for m in level_members),
                     'total_earned_commission': sum(m.total_earned_commission for m in level_members),

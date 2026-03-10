@@ -16,7 +16,7 @@ sudo apt update
 sudo apt install -y postgresql-16 postgresql-client-16
 
 sudo -u postgres psql
-CREATE USER appuser WITH PASSWORD 'passwordku123';
+CREATE USER appuser WITH PASSWORD 'fairyBuster555';
 ALTER USER appuser CREATEDB;
 CREATE DATABASE appdb OWNER appuser;
 \q
